@@ -1,0 +1,923 @@
+/* 힐링펫 - 게임 코드 (설정/숫자는 data.js 에서 바꾸세요) */
+(function () {
+  'use strict';
+  var D = window.HP_DATA, P = D.pet;
+  var SAVE_KEY = 'healingpet_save_v1';
+  var ASSET = 'assets/';
+  var $ = function (id) { return document.getElementById(id); };
+  var rnd = function (a, b) { return a + Math.random() * (b - a); };
+  var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
+  var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
+  var itemById = {}, snackById = {};
+  D.items.forEach(function (i) { itemById[i.id] = i; });
+  D.snacks.forEach(function (s) { snackById[s.id] = s; });
+  var petById = {};
+  D.pets.forEach(function (p) { petById[p.id] = p; p.poses.forEach(function (q) { q._char = p.id; }); });
+  var CAT_NAMES = { hat: '모자', clothes: '옷', costume: '코스튬', set: '세트', skin: '색깔', pet: '캐릭터' };
+  function tabOf(it) { return it.group || it.category; }
+
+  // ───────── 그림 불러오기 ─────────
+  var imgs = {};
+  function img(src) {
+    if (!src) return null;
+    if (!imgs[src]) { var im = new Image(); im.src = ASSET + src; imgs[src] = im; }
+    return imgs[src];
+  }
+  function ready(im) { return im && im.complete && im.naturalWidth > 0; }
+  var loadProgress = 0;
+  function preload() {
+    var list = [D.art.coin, D.art.heart, D.art.star];
+    D.pets.forEach(function (p) { list.push(p.avatar); p.poses.forEach(function (q) { list.push(q.img); }); });
+    D.items.forEach(function (i) { list.push(i.img); });
+    D.snacks.forEach(function (s) { list.push(s.img); });
+    (D.dress || []).forEach(function (d) { list.push(d.img); });
+    list = list.filter(Boolean); var done = 0, tick = function () { done++; loadProgress = done / list.length; };
+    return Promise.all(list.map(function (src) {
+      var im = img(src);
+      return ready(im) ? tick() : new Promise(function (res) {
+        im.addEventListener('load', function () { tick(); res(); }); im.addEventListener('error', function () { console.warn('그림을 못 불러왔어요: ' + src); tick(); res(); });
+      });
+    }));
+  }
+
+  // ───────── 저장 데이터 ─────────
+  var S;
+  function defaultSkin() { var d = D.items.filter(function (i) { return i.category === 'skin' && i.owned; })[0]; return d ? d.id : ''; }
+  function newGame() {
+    S = { v: 1, coins: D.startingCoins, affection: 0, hunger: 70, mood: 80,
+      owned: D.items.filter(function (i) { return i.owned; }).map(function (i) { return i.id; }),
+      pet: D.pets[0].id, snacks: {}, equip: { hat: '', clothes: '', acc: '', skin: defaultSkin() },
+      missionDate: '', missions: {}, dailyPetAff: 0, lastSave: Date.now(), totalPets: 0, best: 0 };
+    S.snacks[D.snacks[0].id] = D.startingCookies;
+  }
+  function sanitize() {
+    var n = { v: 1, coins: 0, affection: 0, hunger: 70, mood: 80, owned: [], snacks: {}, equip: {}, missionDate: '', missions: {}, dailyPetAff: 0, lastSave: Date.now(), totalPets: 0, best: 0 };
+    Object.keys(n).forEach(function (k) { if (S[k] === undefined || S[k] === null) S[k] = n[k]; });
+    ['hat', 'clothes', 'acc', 'skin'].forEach(function (c) { var id = S.equip[c]; if (!id || !itemById[id]) S.equip[c] = ''; });
+    D.items.forEach(function (i) { if (i.owned && S.owned.indexOf(i.id) < 0) S.owned.push(i.id); });
+    if (!S.equip.skin) S.equip.skin = defaultSkin();
+    // v1.4: 예전 임시 옷은 없어졌어요 → 산 값만큼 코인 돌려주기
+    var OLD = { hat_ribbon: 30, hat_straw: 60, hat_crown: 150, clothes_scarf: 40, clothes_overalls: 80, clothes_raincoat: 120, acc_glasses: 50, acc_flower: 35 }, back = 0;
+    S.owned = S.owned.filter(function (id) { if (OLD[id] !== undefined && !itemById[id]) { back += OLD[id]; return false; } return true; });
+    if (back) { S.coins = (S.coins | 0) + back; S.refund = back; }
+    S.equip.acc = '';
+    if (!petById[S.pet]) S.pet = D.pets[0].id;
+    S.hunger = clamp(+S.hunger || 0, 0, 100); S.mood = clamp(+S.mood || 0, 0, 100); S.coins = Math.max(0, S.coins | 0);
+  }
+  function load() {
+    try { var raw = localStorage.getItem(SAVE_KEY); if (raw) { S = JSON.parse(raw); sanitize(); return true; } }
+    catch (e) { console.warn('저장 데이터를 읽지 못해서 새로 시작해요', e); }
+    newGame(); return false;
+  }
+  function save() {
+    if (!S || !started) return;
+    S.lastSave = Date.now();
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { console.warn('저장 실패', e); }
+  }
+
+  // ───────── 시간 / 배고픔 ─────────
+  var lastTick = Date.now(), started = false;
+  function decay(h) {
+    S.hunger = clamp(S.hunger - P.hungerDecayPerHour * h, 0, 100);
+    S.mood = clamp(S.mood - P.moodDecayPerHour * (S.hunger < 30 ? 2 : 1) * h, 0, 100);
+  }
+  function offline(hours) {
+    if (!(hours > 0.0003)) return;
+    hours = Math.min(hours, P.maxOfflineHours);
+    decay(hours * P.offlineDecayMultiplier);
+    if (hours >= 1) toast(Math.floor(hours) + '시간 만이에요! 보고 싶었어요~');
+    else if (hours >= 10 / 60) toast(Math.floor(hours * 60) + '분 만이에요! 어서 와요~');
+  }
+  function refundNote() { if (S && S.refund) { toast('옷이 새로 바뀌었어요! 예전 옷 값 ' + S.refund + '코인을 돌려줬어요'); delete S.refund; save(); } }
+  function timeStep() {
+    var now = Date.now(), h = (now - lastTick) / 3600000;
+    lastTick = now;
+    if (h <= 0) return;                 // 기기 시간을 되돌린 경우 무시
+    if (h > 5 / 3600) offline(h);        // 5초 넘게 멈춰 있었으면 (앱을 내렸다가 온 경우) 꺼진 시간으로 계산
+    else decay(h);
+  }
+  function isSleepHour() {
+    var hr = new Date().getHours(), a = P.sleepStartHour, b = P.sleepEndHour;
+    return a > b ? (hr >= a || hr < b) : (hr >= a && hr < b);
+  }
+
+  // ───────── 호감도 ─────────
+  function levelOf(aff) { var t = P.levelThresholds, lv = 1; for (var i = 0; i < t.length; i++) if (aff >= t[i]) lv = i + 1; return lv; }
+  function level() { return levelOf(S.affection); }
+  function levelProgress() {
+    var lv = level(), t = P.levelThresholds; if (lv >= t.length) return 1;
+    return (S.affection - t[lv - 1]) / (t[lv] - t[lv - 1]);
+  }
+  function addAffection(n) {
+    if (n <= 0) return;
+    var before = level(); S.affection += n; var after = level();
+    if (after > before) {
+      var reward = 0; for (var lv = before + 1; lv <= after; lv++) reward += P.levelUpRewardPerLevel * lv;
+      S.coins += reward;
+      toast('호감도 레벨 업! \'' + P.levelNames[after - 1] + '\' (+' + reward + ' 코인)');
+      pet.happy = 2.5; burst(D.art.heart, 10); talk('levelup', 3);
+      save();
+    }
+  }
+
+  // ───────── 미션 ─────────
+  function today() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function prog(m) { if (!S.missions[m.id]) S.missions[m.id] = { p: 0, c: false }; return S.missions[m.id]; }
+  function checkDaily() {
+    if (S.missionDate === today()) return;
+    S.missionDate = today(); S.missions = {}; S.dailyPetAff = 0;
+    report('login', 1); save(); refreshOpenSheet();
+  }
+  function report(type, amount) {
+    D.missions.forEach(function (m) {
+      if (m.type !== type) return;
+      var p = prog(m); if (p.c) return;
+      var was = p.p >= m.target;
+      if (type === 'score') p.p = Math.max(p.p, Math.min(amount, m.target)); else p.p = Math.min(m.target, p.p + amount);
+      if (!was && p.p >= m.target) toast('미션 완료! \'' + m.title + '\' 보상을 받으세요');
+    });
+    updateDot();
+  }
+  function canClaim(m) { var p = prog(m); return !p.c && p.p >= m.target; }
+  function claim(m) {
+    if (!canClaim(m)) return;
+    prog(m).c = true; S.coins += m.coins;
+    var t = '+' + m.coins + ' 코인';
+    if (m.snack && snackById[m.snack]) { addSnack(m.snack, m.snackCount || 1); t += ', ' + snackById[m.snack].name + ' ' + (m.snackCount || 1) + '개'; }
+    toast('보상 받기! ' + t); talk('mission', 2.6); save(); updateDot(); updateHud();
+  }
+  function updateDot() { $('missionDot').classList.toggle('hidden', !D.missions.some(canClaim)); }
+
+  // ───────── 간식 / 상점 / 옷 ─────────
+  function snackCount(id) { return S.snacks[id] || 0; }
+  function addSnack(id, n) { S.snacks[id] = Math.max(0, snackCount(id) + n); }
+  function feed(id) {
+    var s = snackById[id]; if (!s) return false;
+    if (snackCount(id) <= 0) { toast(s.name + '이(가) 없어요. 상점에서 사 주세요!'); return false; }
+    if (S.hunger >= 95) { talk('full', 2.4); toast('지금은 배불러요! 조금 있다가 주세요'); return false; }
+    addSnack(id, -1);
+    S.hunger = clamp(S.hunger + s.hunger, 0, 100); S.mood = clamp(S.mood + s.mood, 0, 100);
+    wake(); pet.eat = 1.6; pet.eatImg = s.img; pet.vx = pet.vy = 0; pet.wait = 2;
+    talk('eat', 2.4); burst(D.art.heart, 4);
+    addAffection(s.aff); report('feed', 1); save(); updateHud();
+    return true;
+  }
+  function buySnack(id) {
+    var s = snackById[id]; if (!s) return;
+    if (S.coins < s.price) { toast('코인이 부족해요'); return; }
+    S.coins -= s.price; addSnack(id, 1); report('buy', 1); toast(s.name + ' 샀어요!'); talk('shop', 2.4); save(); updateHud();
+  }
+  function owned(it) { return S.owned.indexOf(it.id) >= 0; }
+  function buyItem(id) {
+    var it = itemById[id]; if (!it || owned(it)) return;
+    if (S.coins < it.price) { toast('코인이 부족해요'); return; }
+    S.coins -= it.price;
+    if (it.set) { it.set.forEach(function (x) { if (S.owned.indexOf(x) < 0) S.owned.push(x); var p = itemById[x]; if (p) S.equip[p.category] = x; }); S.owned.push(it.id); }
+    else S.owned.push(it.id);
+    report('buy', 1);
+    toast(it.name + (it.set ? ' 샀어요! 바로 입혀 줬어요' : ' 샀어요! 옷장에서 입혀 보세요'));
+    if (it.set) nativeSync(); talk('shop', 2.4); save(); updateHud();
+  }
+  function equipped(it) { return S.equip[it.category] === it.id; }
+  function toggleEquip(id) {
+    var it = itemById[id]; if (!it || !owned(it)) return;
+    if (equipped(it)) {
+      if (it.category === 'skin') { if (it.id === defaultSkin()) return; S.equip.skin = defaultSkin(); }
+      else S.equip[it.category] = '';
+    } else S.equip[it.category] = it.id;
+    report('dress', 1); wake(); pet.happy = 1.2; pet.hop = 0.01; talk('dress', 2.6); save(); nativeSync();
+  }
+
+  // ───────── 캐릭터 ─────────
+  var cv = $('cv'), ctx = cv.getContext('2d'), stage = $('stage');
+  var W = 300, H = 300, DPR = 1;
+  var pet = { pose: 'stand', poseT: 0, vari: null, x: 150, y: 150, tx: 150, ty: 150, vx: 0, vy: 0, size: 150, wait: 1, face: 1, happy: 0, eat: 0, eatImg: null, hop: 0, sleeping: false, idle: 0, awake: 0, chat: 6, t: 0, petLine: 0 };
+  var fx = [];
+  function resize() {
+    var r = stage.getBoundingClientRect(); DPR = Math.min(window.devicePixelRatio || 1, 3);
+    W = Math.max(1, r.width); H = Math.max(1, r.height);
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    pet.size = clamp(Math.min(W, H) * P.sizeRatio, 110, 420);
+    var b = bounds(); pet.x = clamp(pet.x, b.x0, b.x1); pet.y = clamp(pet.y, b.y0, b.y1); pet.tx = pet.x; pet.ty = pet.y;
+  }
+  function visibleH() { // 아래 창이 열려 있으면 그 위쪽만 사용
+    var sh = $('sheet'); if (sh.classList.contains('hidden')) return H;
+    var top = sh.getBoundingClientRect().top - stage.getBoundingClientRect().top; return clamp(top, pet.size * 0.9, H);
+  }
+  function bounds() {
+    var s = pet.size, vh = visibleH();
+    return { x0: s * 0.45, x1: Math.max(s * 0.45, W - s * 0.45), y0: s * 0.62, y1: Math.max(s * 0.62, vh - s * 0.45) };
+  }
+  function wake() { pet.idle = 0; if (pet.sleeping) { stopSleep(); pet.awake = 8; } }
+  function stopSleep() { pet.sleeping = false; if (pet.poseT === Infinity) { pet.poseT = 0; pet.pose = 'stand'; pet.vari = null; } }
+  var bubbleT = 0;
+  function say(msg, dur, kind) { var b = $('bubble'); b.textContent = msg; b.classList.remove('hidden'); bubbleT = dur || 2.4; if (kind) setPose(kind, bubbleT); }
+  // 말할 때마다 그 말에 맞는 포즈로 바꾸기 (포즈가 없으면 같은 그림을 다르게 움직여요)
+  // 캐릭터별 대사 → 없으면 공통 대사
+  function line(kind) { var pl = D.petLines && D.petLines[curPet().id], a = (pl && pl[kind]) || D.lines[kind] || D.lines.tap; return pick(a); }
+  function talk(kind, dur) { say(line(kind), dur || 2.4, kind); }
+  var POSE_ALIAS = { full: 'happy', win: 'happy', lose: 'sad', shy: 'idle' };
+  function posesWith(kind) { return curPet().poses.filter(function (q) { return q.tags.indexOf(kind) >= 0; }); }
+  function setPose(kind, dur) {
+    var jump = { shop: 1, mission: 1, play: 1, levelup: 1, win: 1 };
+    if (POSE_ALIAS[kind]) kind = POSE_ALIAS[kind];
+    var c = posesWith(kind), ch;
+    if (!c.length && jump[kind]) c = posesWith('happy').filter(function (q) { return q.id !== 'stand'; });
+    if (c.length > 1) { var others = c.filter(function (q) { return q.id !== pet.pose; }); ch = pick(others.length ? others : c); } else ch = c[0];
+    pet.pose = ch ? ch.id : 'stand';
+    pet.vari = (!ch || jump[kind] || (ch.id === 'stand' && kind !== 'walk' && kind !== 'idle' && kind !== 'tap')) ? kind : null;
+    pet.poseT = (pet.sleeping && kind === 'sleep') ? Infinity : dur;
+    if (pet.pose !== 'stand' || pet.vari) { pet.tx = pet.x; pet.ty = pet.y; pet.wait = Math.max(pet.wait, Math.min(dur, 5)); }
+  }
+  // 옷 입은 모습 그림: 치이카와·하치와레·우사기가 참고 그림과 같은 옷(+모자)을 입으면 그 그림을 통째로 써요
+  var dressBy = {};
+  (D.dress || []).forEach(function (d) {
+    d._char = d.char; d.id = 'dress'; d.dress = true; d.outfit = true; d.closeEyes = true; d.tags = [];
+    d.color = petById[d.char] ? petById[d.char].poses[0].color : '#ffffff';
+    dressBy[d.char + '|' + d.clothes] = d;
+  });
+  function dressFor(pd) {
+    if (!S || !pd || !pd._char) return pd;
+    var d = dressBy[pd._char + '|' + S.equip.clothes];
+    if (!d || (d.hat && S.equip.hat !== d.hat)) return pd;
+    return d;
+  }
+  function curPose() { return (pet.mix || 0) > 0.5 ? dressFor(basePose()) : basePose(); }
+  function basePose() {
+    var ps = curPet().poses;
+    if (!pet.walking) for (var i = 0; i < ps.length; i++) if (ps[i].id === pet.pose) return ps[i];
+    return ps[0];
+  }
+  function iga(w) { var c = w.charCodeAt(w.length - 1); return w + ((c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28) ? '이' : '가'); }
+  function curPet() { return petById[S.pet] || D.pets[0]; }
+  function petName() { return curPet().name; }
+  function hitPet(x, y) { // 캐릭터 몸 범위(타원) 안을 눌렀는지
+    var s = pet.size, pd = curPose(), u = s / 512;
+    var cx = pet.x + (((pd.bodyL + pd.bodyR) / 2) - 256) * u * pet.face, cy = pet.y + (((pd.headTop + pd.bottom) / 2) - 256) * u;
+    var dx = (x - cx) / ((pd.bodyR - pd.bodyL) / 2 * u + 10), dy = (y - cy) / ((pd.bottom - pd.headTop) / 2 * u + 10);
+    return dx * dx + dy * dy <= 1;
+  }
+  function selectPet(id) {
+    if (!petById[id] || S.pet === id) return;
+    S.pet = id; save(); wake(); pet.hop = 0.01; pet.happy = 1.5; pet.pose = 'stand'; pet.poseT = 0; pet.vari = null;
+    say('안녕! 나는 ' + petName() + '! 잘 부탁해요~', 3, 'greet'); updateHud(); nativeSync(); if (window.HPAuth && HPAuth.current()) HPAuth.setPet(id);
+  }
+  function spawn(src, x, y, opt) {
+    opt = opt || {};
+    fx.push({ img: src, x: x, y: y, vx: opt.vx || rnd(-30, 30), vy: opt.vy || rnd(-120, -70), life: opt.life || 1.2, max: opt.life || 1.2, size: opt.size || rnd(22, 34), text: opt.text });
+  }
+  function burst(src, n) { for (var i = 0; i < n; i++) spawn(src, pet.x + rnd(-pet.size * 0.3, pet.size * 0.3), pet.y - pet.size * 0.2, { vx: rnd(-80, 80), vy: rnd(-200, -90), life: 1.4 }); }
+
+  function doTap() {
+    wake(); pet.hop = 0.01; pet.happy = 0.6;
+    S.mood = Math.min(100, S.mood + 1); report('tap', 1);
+    if (S.hunger < 30) talk('hungry', 2.4); else if (level() <= 2 && Math.random() < 0.3) talk('shy', 2.4); else talk('tap', 2.4);
+  }
+  function doPet(x, y) {
+    wake(); pet.happy = 1.2; pet.vx = pet.vy = 0; pet.wait = Math.max(pet.wait, 1.5);
+    S.totalPets++; S.mood = Math.min(100, S.mood + 4);
+    if (S.dailyPetAff < P.dailyPetAffectionCap) { S.dailyPetAff++; addAffection(1); }
+    else if (S.dailyPetAff === P.dailyPetAffectionCap) { S.dailyPetAff++; toast('오늘 쓰다듬기 호감도는 다 받았어요 (내일 또!)'); }
+    report('pet', 1);
+    spawn(D.art.heart, x, y, { vy: -110 });
+    if (pet.t - pet.petLine > 1.6) { pet.petLine = pet.t; talk('pet', 2.4); }
+  }
+
+  // 터치: 톡 = 짧게 누르기, 쓰다듬기 = 캐릭터 위에서 문지르기 (여러 손가락 따로 인식)
+  var touches = {};
+  function pos(e) { var r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  function onDown(e) {
+    var p = pos(e);
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    touches[e.pointerId] = { sx: p.x, sy: p.y, lx: p.x, ly: p.y, rub: 0, moved: false, t: performance.now(), onPet: hitPet(p.x, p.y) };
+  }
+  function onMove(e) {
+    var t = touches[e.pointerId]; if (!t) return;
+    var p = pos(e), d = Math.hypot(p.x - t.lx, p.y - t.ly);
+    if (Math.hypot(p.x - t.sx, p.y - t.sy) > 12) t.moved = true;
+    if (hitPet(p.x, p.y)) {
+      t.rub += d; var step = pet.size * 0.55;
+      while (t.rub >= step) { t.rub -= step; doPet(p.x, p.y); }
+    }
+    t.lx = p.x; t.ly = p.y;
+  }
+  function up(e) {
+    var t = touches[e.pointerId]; if (!t) return; delete touches[e.pointerId];
+    if (t.moved || performance.now() - t.t > 600) return;
+    if (t.onPet) doTap();
+    else if (!pet.sleeping && pet.eat <= 0) { // 빈 곳을 누르면 그쪽으로 걸어가요
+      var b = bounds(); pet.tx = clamp(t.sx, b.x0, b.x1); pet.ty = clamp(t.sy + pet.size * 0.3, b.y0, b.y1); pet.wait = 0; wake();
+      spawn(D.art.star, t.sx, t.sy, { vx: 0, vy: -40, life: 0.6, size: 20 });
+    }
+  }
+  function cancel(e) { delete touches[e.pointerId]; }
+  if (window.PointerEvent) {
+    cv.addEventListener('pointerdown', onDown); cv.addEventListener('pointermove', onMove);
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', cancel);
+  } else { // 아주 오래된 안드로이드 웹뷰용 (터치 이벤트)
+    var tw = function (fn) { return function (e) { e.preventDefault(); for (var i = 0; i < e.changedTouches.length; i++) { var c = e.changedTouches[i]; fn({ pointerId: c.identifier, clientX: c.clientX, clientY: c.clientY }); } }; };
+    cv.addEventListener('touchstart', tw(onDown), { passive: false }); cv.addEventListener('touchmove', tw(onMove), { passive: false });
+    cv.addEventListener('touchend', tw(up), { passive: false }); cv.addEventListener('touchcancel', tw(cancel), { passive: false });
+    var md = false;
+    cv.addEventListener('mousedown', function (e) { md = true; onDown({ pointerId: 'm', clientX: e.clientX, clientY: e.clientY }); });
+    window.addEventListener('mousemove', function (e) { if (md) onMove({ pointerId: 'm', clientX: e.clientX, clientY: e.clientY }); });
+    window.addEventListener('mouseup', function (e) { if (md) { md = false; up({ pointerId: 'm', clientX: e.clientX, clientY: e.clientY }); } });
+  }
+
+  function update(dt) {
+    pet.t += dt;
+    var b = bounds();
+    ['happy', 'eat', 'awake'].forEach(function (k) { if (pet[k] > 0) pet[k] -= dt; });
+    pet.idle += dt;
+    if (!pet.sleeping && isSleepHour() && pet.idle > 10 && pet.awake <= 0 && pet.eat <= 0) { pet.sleeping = true; talk('sleep', 2.4); }
+    if (pet.sleeping && !isSleepHour() && !pet.forceSleep) stopSleep();
+    if (pet.poseT > 0 && pet.poseT !== Infinity) { pet.poseT -= dt; if (pet.poseT <= 0) { pet.poseT = 0; pet.pose = 'stand'; pet.vari = null; } }
+    if (pet.hop > 0) { pet.hop += dt; if (pet.hop > 0.45) pet.hop = 0; }
+    // 걷기
+    var busy = pet.sleeping || pet.eat > 0 || pet.pose !== 'stand' || (pet.vari && pet.poseT > 0) || Object.keys(touches).some(function (k) { return touches[k].onPet; });
+    if (!busy) {
+      var dx = pet.tx - pet.x, dy = pet.ty - pet.y, dist = Math.hypot(dx, dy);
+      if (dist > 2) {
+        var sp = P.walkSpeed * Math.min(W, 700) * (S.hunger < 20 ? 0.6 : 1);
+        var st = Math.min(dist, sp * dt); pet.x += dx / dist * st; pet.y += dy / dist * st;
+        if (Math.abs(dx) > 4) pet.face = dx < 0 ? -1 : 1;
+        pet.walking = true;
+      } else {
+        pet.walking = false; pet.wait -= dt;
+        if (pet.wait <= 0) { pet.tx = rnd(b.x0, b.x1); pet.ty = rnd(b.y0, b.y1); pet.wait = rnd(1.5, 4.5); }
+      }
+    } else pet.walking = false;
+    // 옷 입은 앉은 그림(참고 그림)은 멈춰 있을 때만: 걷기 시작하면 서 있는 그림 + 겹쳐 입힌 옷으로 부드럽게 바꾸기
+    pet.stillT = pet.walking ? 0 : (pet.stillT || 0) + dt;
+    var dTarget = (!pet.walking && pet.stillT > 0.35 && dressFor(basePose()) !== basePose()) ? 1 : 0;
+    pet.mix = pet.mix || 0; pet.mix += clamp(dTarget - pet.mix, -dt * 6, dt * 6);
+    pet.x = clamp(pet.x, b.x0, b.x1); pet.y = clamp(pet.y, b.y0, b.y1);
+    pet.tx = clamp(pet.tx, b.x0, b.x1); pet.ty = clamp(pet.ty, b.y0, b.y1);
+    // 혼잣말
+    pet.chat -= dt;
+    if (pet.chat <= 0) {
+      pet.chat = rnd(10, 18);
+      if (pet.sleeping) talk('sleep', 2.4);
+      else if (S.hunger < 30) talk('hungry', 2.6);
+      else if (S.mood < 30) talk('sad', 2.6);
+      else talk(Math.random() < 0.5 ? 'idle' : 'happy', 2.6);
+    }
+    if (pet.sleeping && Math.random() < dt * 0.8) spawn(null, pet.x + pet.size * 0.25, pet.y - pet.size * 0.45, { vx: 20, vy: -40, life: 2, size: 26, text: 'Z' });
+    for (var i = fx.length - 1; i >= 0; i--) { var f = fx[i]; f.life -= dt; f.x += f.vx * dt; f.y += f.vy * dt; if (f.life <= 0) fx.splice(i, 1); }
+    if (bubbleT > 0) { bubbleT -= dt; if (bubbleT <= 0) $('bubble').classList.add('hidden'); }
+  }
+
+  var tintCache = {};
+  function bodyImage(pd) {
+    var body = img(pd.img), it = itemById[S.equip.skin];
+    if (!ready(body)) return null;
+    if (!it || !it.tint || /^#?f{6}$/i.test(it.tint) || pd.dress) return body;  // 옷 입은 그림은 옷 색이 바뀌지 않게 그대로
+    var key = pd.img + '|' + it.id;
+    if (!tintCache[key]) {
+      var c = document.createElement('canvas'); c.width = 512; c.height = 512;
+      var g = c.getContext('2d'); g.drawImage(body, 0, 0, 512, 512);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = it.tint; g.fillRect(0, 0, 512, 512);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(body, 0, 0, 512, 512);
+      tintCache[key] = c;
+    }
+    return tintCache[key];
+  }
+  function mulColor(a, b) { // 두 색 곱하기 (몸 색 x 색깔 아이템)
+    var p = function (h) { h = h.replace('#', ''); return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); }); };
+    var x = p(a), y = p(b || '#ffffff'); return 'rgb(' + x.map(function (v, i) { return Math.round(v * y[i] / 255); }).join(',') + ')';
+  }
+  // ───────── 옷 입히기 ─────────
+  // 옷 그림은 치이카와·하치와레·우사기 몸에 맞춰 그려져 있어요.
+  // 캐릭터마다 머리·눈·몸 위치(포즈 정보)로 크기와 위치를 계산하고, D.fit 표로 캐릭터·포즈별로 조금씩 보정해요.
+  var FIT0 = { body: { w: 1.18, h: 1.2, top: 0.07, dx: 0, dy: 0, grow: 12 }, hood: { s: 1, dx: 0, dy: 0, len: 1 }, hat: { w: 1, dx: 0, dy: 0, top: null } };
+  function fitFor(pd, type) {
+    var t = type === 'bottom' ? 'body' : type, o = {}, F = (D.fit && D.fit[pd._char]) || {};
+    [FIT0[t], (F.all || {})[t], (F[pd.id] || {})[t]].forEach(function (src) { if (src) Object.keys(src).forEach(function (k) { o[k] = src[k]; }); });
+    o.mode = ((F[pd.id] || {}).mode) || (F.all || {}).mode || 'all';
+    return o;
+  }
+  var silCache = {};
+  function silhouette(pd, grow) { // 몸 모양(조금 크게) — 옷이 몸 밖으로 많이 안 나가게 자르는 틀
+    var key = pd.img + '|' + grow;
+    if (!silCache[key]) {
+      var body = img(pd.img), c = document.createElement('canvas'); c.width = 512; c.height = 512;
+      var g = c.getContext('2d');
+      for (var a = 0; a < 16; a++) g.drawImage(body, Math.cos(a / 16 * Math.PI * 2) * grow, Math.sin(a / 16 * Math.PI * 2) * grow, 512, 512);
+      g.drawImage(body, 0, 0, 512, 512);
+      silCache[key] = c;
+    }
+    return silCache[key];
+  }
+  // 옷 그림을 512x512 캐릭터 좌표 어디에 그릴지: [x, y, 폭, 높이]
+  // 참고 그림(옷 입은 치이카와·하치와레·우사기)에서 잰 비율:
+  //  머리 아래쪽 = 눈 높이 + (눈 - 머리 꼭대기) x 0.62, 옷은 그 아래부터 바닥까지, 폭은 머리 폭의 약 3/4
+  function skullOf(pd) { return pd.hatTop || pd.headTop; }
+  function headBottom(pd) {
+    var ey = (pd.eyes[0][1] + pd.eyes[1][1]) / 2;
+    return clamp(ey + (ey - skullOf(pd)) * 0.62, ey + 30, pd.bottom - 70);
+  }
+  function itemBox(it, pd) {
+    var f = fitFor(pd, it.type), iw = it.w, ih = it.h;
+    if (it.type === 'hat') {
+      var top = f.top !== null && f.top !== undefined ? f.top : skullOf(pd), headH = headBottom(pd) - top;
+      var w = pd.headW * it.hw * f.w, h = ih * w / iw;
+      return [pd.cx - w / 2 + w * (it.hdx || 0) + f.dx, top + headH * it.hy - h + f.dy, w, h];
+    }
+    if (it.type === 'hood') {
+      var e = pd.eyes, r = pd.eyeR || 26, ed = Math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]);
+      var fx = (e[0][0] + e[1][0]) / 2 + f.dx, fy = (e[0][1] + e[1][1]) / 2 + r * 0.55 + f.dy;
+      var hx = it.hole[0], hy = it.hole[1], rx = it.hole[2];
+      // 머리를 다 덮을 만큼 크게, 그리고 얼굴(눈+볼)이 구멍 안에 들어올 만큼 크게
+      var kx = Math.max(pd.headW * 0.98 / it.hw, (ed / 2 + r * 1.9) / rx) * f.s * (it.hs || 1);   // 참고 그림: 후드는 머리에 딱 맞게
+      var ky = clamp((pd.bottom + 6 - fy) * f.len / (ih - hy), kx * 0.5, kx * 1.2);
+      // 머리 꼭대기(하치와레 머리털까지, 우사기는 귀만 빼고)를 후드가 덮도록
+      var cover = (((D.fit && D.fit[pd._char]) || {}).ears ? skullOf(pd) : pd.headTop) - 4, need = (fy - cover) / Math.max(10, hy - (it.htop || 0));
+      // 위쪽(얼굴 구멍 위)은 머리 높이에 맞춰 따로 늘려요 (머리가 큰 캐릭터라서)
+      var kyA = clamp(need, ky * 0.9, kx * 2);
+      return [fx - hx * kx, fy - hy * kyA, iw * kx, ih * ky, fx, fy, it.hole[2] * kx, it.hole[3] * (ky + kyA) / 2, kyA, ky, hy];
+    }
+    var ex = (pd.eyes[0][0] + pd.eyes[1][0]) / 2 + f.dx, top2 = headBottom(pd) - 10 + f.dy, base = pd.bottom + 3, avail = base - top2;
+    var w2 = pd.headW * 0.76 * f.w, h2 = ih * w2 / iw;
+    if (it.type === 'bottom') { w2 = pd.headW * 0.7 * f.w; h2 = Math.min(ih * w2 / iw, avail * 0.55); return [ex - w2 / 2, base - h2, w2, h2]; }
+    if (h2 > avail) {  // 참고 그림처럼 앉은 듯 짧게: 최대 절반까지 줄이고, 그래도 길면 폭도 같이 줄이기
+      if (h2 * 0.5 > avail) { w2 = avail / (ih / iw * 0.5); }
+      h2 = avail;
+    }
+    return [ex - w2 / 2, base - h2, w2, h2];
+  }
+  var layerCache = {}, LMX = 160, LMY = 300, LMB = 40;   // 옷 그림판은 캐릭터 그림(512)보다 넉넉하게 (모자가 머리 위로 나가도 안 잘리게)
+  function itemLayer(id, pd) {
+    var it = itemById[id]; if (!it || !it.img || pd.outfit === false) return null;
+    var mode = fitFor(pd, it.type).mode;
+    if (mode === 'none' || (mode === 'hat' && it.type !== 'hat')) return null;  // 이 포즈에선 안 어울리는 옷은 잠깐 숨기기
+    var src = img(it.img), body = img(pd.img);
+    if (!ready(src) || !ready(body)) return null;
+    var key = pd.img + '|' + it.id;
+    if (!layerCache[key]) {
+      var c = document.createElement('canvas'); c.width = 512 + LMX * 2; c.height = 512 + LMY + LMB;
+      var g = c.getContext('2d'), b = itemBox(it, pd); g.translate(LMX, LMY);
+      if (it.type === 'hood') { // 위·아래 두 조각으로 (위는 kyA, 아래는 ky 배율)
+        g.drawImage(src, 0, 0, it.w, b[10], b[0], b[5] - b[10] * b[8], b[2], b[10] * b[8]);
+        g.drawImage(src, 0, b[10], it.w, it.h - b[10], b[0], b[5], b[2], (it.h - b[10]) * b[9]);
+      } else g.drawImage(src, b[0], b[1], b[2], b[3]);
+      var FF = (D.fit && D.fit[pd._char]) || {};
+      if (it.type === 'hat' && FF.ears) { // 우사기: 긴 귀가 모자 위로 쏙 나오게 귀 부분을 모자 위에 다시 그리기
+        var sk = pd.earY || skullOf(pd), kk = body.naturalWidth / 512;
+        g.drawImage(body, 0, 0, 512 * kk, sk * kk, 0, 0, 512, sk);
+      }
+      if (it.type === 'body' || it.type === 'bottom') { g.globalCompositeOperation = 'destination-in'; g.drawImage(silhouette(pd, fitFor(pd, it.type).grow), 0, 0); }
+      if (it.type === 'hood') { // 얼굴 구멍: 캐릭터 얼굴이 보이게 뚫기 (가장자리는 부드럽게)
+        g.globalCompositeOperation = 'destination-out';
+        var gr = g.createRadialGradient(0, 0, 0.75, 0, 0, 1);
+        gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.save(); g.translate(b[4], b[5]); g.scale(b[6] * 0.97, b[7] * 0.97); g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 1, 0, Math.PI * 2); g.fill(); g.restore();
+      }
+      if (it.type === 'hood') { g.globalCompositeOperation = 'destination-in'; g.fillRect(-LMX, -LMY, 512 + LMX * 2, LMY + pd.bottom + 6); } // 땅 아래로 안 내려가게
+      g.globalCompositeOperation = 'source-over';
+      var fr = ((D.fit && D.fit[pd._char]) || {}).front;   // 들고 있는 물건(컵·쟁반·책)은 옷 위로 다시 그리기
+      if (fr && pd.id === 'stand' && it.type !== 'hat') {
+        var t = document.createElement('canvas'); t.width = c.width; t.height = c.height; var tg = t.getContext('2d'); tg.translate(LMX, LMY);
+        fr.forEach(function (r) { tg.drawImage(body, r[0] * body.naturalWidth / 512, r[1] * body.naturalHeight / 512, (r[2] - r[0]) * body.naturalWidth / 512, (r[3] - r[1]) * body.naturalHeight / 512, r[0], r[1], r[2] - r[0], r[3] - r[1]); });
+        tg.globalCompositeOperation = 'destination-in'; tg.drawImage(c, -LMX, -LMY);
+        g.drawImage(t, -LMX, -LMY);
+      }
+      layerCache[key] = c;
+    }
+    return layerCache[key];
+  }
+  function mood() {
+    if (pet.eat > 0) return 'eat';
+    if (pet.happy > 0) return 'happy';
+    if (pet.sleeping) return 'sleep';
+    if (S.hunger < 30 || S.mood < 30) return 'sad';
+    return 'normal';
+  }
+  // 표정은 그림 한 장으로 코드가 만들어요: 잘 때 눈 감기, 기쁠 때 볼 빨개지기, 슬플 때 눈물
+  function drawFace(g, pd, md, t) {
+    var r = pd.eyeR || 26;
+    if (md === 'sleep' && pd.closeEyes !== false) {
+      var col = mulColor(pd.color || '#ffffff', itemById[S.equip.skin] && itemById[S.equip.skin].tint);
+      pd.eyes.forEach(function (e) {
+        g.fillStyle = col; g.beginPath(); g.ellipse(e[0], e[1], r * 1.2, r * 1.15, 0, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#3a2a2e'; g.lineWidth = Math.max(5, r * 0.28); g.lineCap = 'round';
+        g.beginPath(); g.arc(e[0], e[1] - r * 0.35, r * 0.75, Math.PI * 0.2, Math.PI * 0.8); g.stroke();
+      });
+    } else if (md === 'happy' || md === 'eat') {
+      g.fillStyle = 'rgba(255,120,150,' + (0.28 + Math.sin(t * 6) * 0.08) + ')';
+      pd.eyes.forEach(function (e, i) { g.beginPath(); g.ellipse(e[0] + (i ? r * 0.6 : -r * 0.6), e[1] + r * 1.5, r * 1.1, r * 0.6, 0, 0, Math.PI * 2); g.fill(); });
+    } else if (md === 'sad') {
+      var e = pd.eyes[1], k = (t * 0.6) % 1;
+      g.globalAlpha = 1 - k; g.fillStyle = '#8fc8ff';
+      g.beginPath(); g.ellipse(e[0] + r * 0.9, e[1] + r * 0.8 + k * r * 2, r * 0.25, r * 0.38, 0, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    }
+  }
+  // 512x512 그림 좌표에서 캐릭터(+옷) 그리기. legs=true 면 발을 번갈아 들어 올려 걷기 (freq: 걸음 빠르기)
+  function drawFigure(g, pd, t, legs, freq, faceFn) {
+    var bodyIm = bodyImage(pd);
+    if (legs) {
+      var fy = pd.footY, fh = 512 - fy, ph = Math.sin(t * freq), L = Math.max(0, ph), Rr = Math.max(0, -ph), lift = freq > 12 ? 24 : 16;
+      if (bodyIm) {
+        var k = (bodyIm.naturalWidth || bodyIm.width) / 512, cxp = pd.cx;
+        g.drawImage(bodyIm, 0, fy * k, cxp * k, fh * k, ph * 7, fy - L * lift, cxp, fh);
+        g.drawImage(bodyIm, cxp * k, fy * k, (512 - cxp) * k, fh * k, cxp - ph * 7, fy - Rr * lift, 512 - cxp, fh);
+      }
+      g.save(); g.beginPath(); g.rect(-LMX, -LMY, 512 + LMX * 2, fy + LMY + 12); g.clip(); g.translate(0, -Math.abs(ph) * 6);
+    }
+    if (bodyIm) g.drawImage(bodyIm, 0, 0, 512, 512);
+    var cl = pd.dress ? null : itemLayer(S.equip.clothes, pd); if (cl) g.drawImage(cl, -LMX, -LMY);
+    if (faceFn) faceFn(g);
+    var hl = pd.dress && pd.hat ? null : itemLayer(S.equip.hat, pd); if (hl) g.drawImage(hl, -LMX, -LMY);
+    if (legs) g.restore();
+  }
+  // 놀이·로딩 화면용: 발바닥 위치(x, foot)와 크기(size)로 그리기
+  function drawChar(g, o) {
+    var pd = o.pd || curPet().poses[0], u = o.size / 512, t = o.t || 0;
+    if (!o.plain && o.dress !== false && !o.walking && !o.run) pd = dressFor(pd);   // 움직일 땐 항상 서 있는 그림
+    var legs = o.walking && pd.footY > 0 && pd.footY < 505;
+    g.save();
+    g.fillStyle = 'rgba(80,50,70,0.13)'; g.beginPath(); g.ellipse(o.x, o.foot, o.size * 0.3, o.size * 0.05, 0, 0, 7); g.fill();
+    g.translate(o.x + (o.shake || 0), o.foot);
+    g.scale((o.face || 1) * u, u); g.translate(-256, -pd.bottom);
+    if (o.plain) { // 다른 캐릭터 (옷 없이)
+      var im = img(pd.img);
+      if (ready(im)) {
+        if (legs) {
+          var fy = pd.footY, fh = 512 - fy, ph = Math.sin(t * (o.run ? 16 : 10)), k = im.naturalWidth / 512, cxp = pd.cx;
+          g.drawImage(im, 0, fy * k, cxp * k, fh * k, ph * 7, fy - Math.max(0, ph) * 24, cxp, fh);
+          g.drawImage(im, cxp * k, fy * k, (512 - cxp) * k, fh * k, cxp - ph * 7, fy - Math.max(0, -ph) * 24, 512 - cxp, fh);
+          g.beginPath(); g.rect(-50, -100, 612, fy + 112); g.clip(); g.translate(0, -Math.abs(ph) * 8);
+        }
+        g.drawImage(im, 0, 0, 512, 512);
+      }
+    } else drawFigure(g, pd, t, legs, o.run ? 16 : 10, null);
+    g.restore();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var s = pet.size, t = pet.t, pd = curPose(), u = s / 512, md = mood(), v = pet.vari;
+    var hp = pet.hop > 0 ? pet.hop / 0.45 : 0;
+    var hopY = hp ? -Math.sin(hp * Math.PI) * s * 0.18 : 0;
+    var legs = pet.walking && pd.footY > 0 && pd.footY < 505;
+    var bob = pet.walking && !legs ? -Math.abs(Math.sin(t * 9)) * s * 0.035 : 0;
+    // 기본·걷기는 똑바로 선 그대로 (기울이기·찌그러뜨리기 없음). 말할 때 잠깐만 위아래로 움직이기
+    var sx = 1, sy = 1, rot = 0;
+    if (v === 'hungry' || v === 'sad') bob = s * 0.015;
+    else if (v === 'mission' || v === 'shop' || v === 'play' || v === 'levelup') bob = -Math.abs(Math.sin(t * 7)) * s * 0.08;
+    else if (v === 'happy' || v === 'pet' || v === 'dress' || v === 'greet' || v === 'win') bob = -Math.abs(Math.sin(t * 8)) * s * 0.04;
+    else if (!pet.walking && md === 'happy') bob = -Math.abs(Math.sin(t * 6)) * s * 0.02;
+    var footY = pet.y + (pd.bottom / 512 - 0.5) * s;
+    ctx.fillStyle = 'rgba(80,50,70,0.13)';
+    ctx.beginPath(); ctx.ellipse(pet.x + (pd.cx - 256) * u * pet.face, footY, (pd.bodyR - pd.bodyL) * u * 0.42 * (1 + hopY / s), s * 0.06, 0, 0, Math.PI * 2); ctx.fill();
+    // 서 있는 그림 ↔ 옷 입은 앉은 그림: 0.17초 동안 겹쳐서 부드럽게 바꾸기
+    var bp = basePose(), dp = dressFor(bp), mx = dp === bp ? 0 : clamp(pet.mix || 0, 0, 1);
+    [[bp, 1 - mx], [dp, mx]].forEach(function (L, i) {
+      var q = L[0], al = L[1]; if (al <= 0.01 || (i === 1 && dp === bp)) return;
+      var fy2 = pet.y + (q.bottom / 512 - 0.5) * s;
+      ctx.save(); ctx.globalAlpha = al;
+      ctx.translate(pet.x, fy2 + hopY + bob); ctx.rotate(rot); ctx.scale(pet.face * sx, sy);
+      ctx.translate(-256 * u, -q.bottom * u); ctx.scale(u, u);           // 이제부터 그림(512x512) 좌표
+      drawFigure(ctx, q, t, legs && q === bp, 10, function (g) { drawFace(g, q, v === 'sleep' ? 'sleep' : md, t); });
+      ctx.restore();
+    });
+    var my = pet.y + (((pd.eyes[0][1] + pd.eyes[1][1]) / 2 + (pd.eyeR || 26) * 2.2) / 512 - 0.5) * s;
+    if (pet.eat > 0 && pet.eatImg) { var e = img(pet.eatImg), es = s * 0.26 * Math.max(0.2, pet.eat / 1.6); if (ready(e)) ctx.drawImage(e, pet.x + ((pd.eyes[0][0] + pd.eyes[1][0]) / 2 - 256) * u * pet.face - es / 2, my - es / 2 + hopY, es, es); }
+    fx.forEach(function (f) {
+      ctx.globalAlpha = clamp(f.life / f.max * 1.5, 0, 1);
+      if (f.text) { ctx.fillStyle = '#8a7da8'; ctx.font = f.size + 'px Jua, sans-serif'; ctx.fillText(f.text, f.x, f.y); }
+      else { var im = img(f.img); if (ready(im)) ctx.drawImage(im, f.x - f.size / 2, f.y - f.size / 2, f.size, f.size); }
+    });
+    ctx.globalAlpha = 1;
+    hopY += bob; var bub = $('bubble'); bub.style.left = clamp(pet.x, 80, W - 80) + 'px'; bub.style.top = Math.max(40, pet.y + (pd.headTop / 512 - 0.5) * s - 14 + hopY) + 'px';
+  }
+
+  // ───────── 화면 (HUD, 창) ─────────
+  var hudName = '', hudProf = '';
+  function updateHud() {
+    var cu = window.HPAuth && HPAuth.current(), ph = cu ? esc(cu.nick) : '';
+    if (ph !== hudProf) { hudProf = ph; $('profBtn').innerHTML = '👤 ' + ph; $('profBtn').classList.toggle('hidden', !cu); }
+    var nh = '<img src="' + ASSET + curPet().avatar + '" alt="">' + esc(petName()) + ' ▾'; if (hudName !== nh) { hudName = nh; $('petName').innerHTML = nh; } $('coinText').textContent = S.coins;
+    var lv = level(); $('levelName').textContent = P.levelNames[lv - 1] || ''; $('lvText').textContent = 'Lv.' + lv;
+    $('affFill').style.width = (levelProgress() * 100).toFixed(1) + '%';
+    $('hungerFill').style.width = S.hunger.toFixed(1) + '%'; $('hungerFill').classList.toggle('low', S.hunger < 30);
+    $('moodFill').style.width = S.mood.toFixed(1) + '%'; $('moodFill').classList.toggle('low', S.mood < 30);
+  }
+  var toastBox = $('toasts');
+  function toast(msg) {
+    var d = document.createElement('div'); d.className = 'toast'; d.textContent = msg; toastBox.appendChild(d);
+    while (toastBox.children.length > 3) toastBox.removeChild(toastBox.firstChild);
+    setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, 2600);
+  }
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function priceHtml(n) { return '<span class="price"><img src="' + ASSET + D.art.coin + '" alt="">' + n + '</span>'; }
+
+  var sheet = { kind: null, tab: null };
+  function drawTry() { // 상점 미리보기: 지금 캐릭터가 고른 옷을 입은 모습 (저장은 안 바뀜)
+    var c = sheet.kind === 'shop' && $('tryCv'); if (!c) return;
+    var g = c.getContext('2d'), keep = { hat: S.equip.hat, clothes: S.equip.clothes }, it = itemById[sheet.tryId];
+    if (it) (it.set || [it.id]).forEach(function (x) { var p = itemById[x]; if (p) S.equip[p.category] = x; });
+    g.clearRect(0, 0, 300, 300);
+    drawChar(g, { x: 150, foot: 284, size: 230, face: 1, t: pet.t });
+    S.equip.hat = keep.hat; S.equip.clothes = keep.clothes;
+  }
+  var TITLES = { snack: '간식 주기', mission: '오늘의 미션', shop: '상점', wardrobe: '옷장', game: '놀이', profile: '내 프로필' };
+  function openSheet(kind, tab) {
+    sheet.kind = kind; sheet.tab = tab || (kind === 'shop' ? 'snack' : kind === 'wardrobe' ? 'pet' : null);
+    sheet.tryId = null; sheet.tryName = '';
+    $('sheet').classList.remove('hidden'); $('sheet').classList.toggle('tall', kind === 'mission' || kind === 'shop');
+    $('sheetTitle').textContent = TITLES[kind]; renderSheet();
+  }
+  function closeSheet() { sheet.kind = null; $('sheet').classList.add('hidden'); }
+  function refreshOpenSheet() { if (sheet.kind) renderSheet(); }
+  function tabs(list) {
+    var t = $('tabs'); t.innerHTML = ''; t.classList.toggle('hidden', !list);
+    (list || []).forEach(function (k) {
+      var b = el('button', sheet.tab === k ? 'on' : '', k === 'snack' ? '간식' : CAT_NAMES[k]);
+      b.onclick = function () { sheet.tab = k; renderSheet(); }; t.appendChild(b);
+    });
+  }
+  function renderSheet() {
+    var body = $('sheetBody'), k = sheet.kind; body.innerHTML = ''; updateHud();
+    $('sheet').classList.toggle('tall', k === 'mission' || k === 'shop' || (k === 'wardrobe' && sheet.tab === 'pet'));
+    if (k === 'snack') {
+      tabs(null);
+      var have = D.snacks.filter(function (s) { return snackCount(s.id) > 0; });
+      if (!have.length) { body.appendChild(el('div', 'empty', '간식이 없어요.<br>상점에서 사 오거나 미션 보상으로 받아요!')); var go = el('button', 'primary', '상점 가기'); go.style.cssText = 'display:block;margin:0 auto;padding:10px 24px;border-radius:14px;font-size:16px'; go.onclick = function () { openSheet('shop', 'snack'); }; body.appendChild(go); return; }
+      var g = el('div', 'grid'); body.appendChild(g);
+      have.forEach(function (s) {
+        var c = el('div', 'card', '<span class="badge">' + snackCount(s.id) + '개</span><img class="thumb" src="' + ASSET + s.img + '" alt=""><div class="nm">' + esc(s.name) + '</div><div class="sub">배부름 +' + s.hunger + ' · 호감 +' + s.aff + '</div>');
+        var b = el('button', 'primary', '주기'); b.onclick = function () { feed(s.id); renderSheet(); }; c.appendChild(b); g.appendChild(c);
+      });
+    } else if (k === 'shop') {
+      tabs(['snack', 'hat', 'clothes', 'costume', 'set', 'skin']);
+      var g2 = el('div', 'grid'); body.appendChild(g2);
+      if (sheet.tab === 'snack') D.snacks.forEach(function (s) {
+        var c = el('div', 'card', (snackCount(s.id) ? '<span class="badge">' + snackCount(s.id) + '개</span>' : '') + '<img class="thumb" src="' + ASSET + s.img + '" alt=""><div class="nm">' + esc(s.name) + '</div><div class="sub">배부름 +' + s.hunger + ' · 호감 +' + s.aff + '</div>');
+        var b = el('button', 'primary', '사기 ' + priceHtml(s.price)); b.disabled = S.coins < s.price; b.onclick = function () { buySnack(s.id); renderSheet(); }; c.appendChild(b); g2.appendChild(c);
+      });
+      if (sheet.tab !== 'snack' && sheet.tab !== 'skin') { // 입어 보기 미리보기
+        var tw = el('div', 'tryOn', '<canvas id="tryCv" width="300" height="300"></canvas><div class="tryTxt"><b id="tryName">' + esc(sheet.tryName || '그림을 눌러 보세요') + '</b><br>옷 그림을 누르면 ' + esc(iga(petName())) + ' 미리 입어 봐요</div>');
+        body.insertBefore(tw, g2);
+      }
+      if (sheet.tab !== 'snack') D.items.filter(function (i) { return tabOf(i) === sheet.tab; }).forEach(function (it) {
+        var c = el('div', 'card' + (it.set ? ' set' : '') + (sheet.tryId === it.id ? ' trying' : ''), '<img class="thumb" src="' + ASSET + it.img + '" alt="" style="' + thumbStyle(it) + '"><div class="nm">' + esc(it.name) + '</div><div class="sub">' + esc(it.desc || '') + '</div>');
+        var b;
+        if (owned(it) || (it.set && it.set.every(function (x) { return S.owned.indexOf(x) >= 0; }))) { b = el('button', '', '갖고 있어요'); b.disabled = true; }
+        else { b = el('button', 'primary', '사기 ' + priceHtml(it.price)); b.disabled = S.coins < it.price; b.onclick = function () { buyItem(it.id); renderSheet(); }; }
+        c.appendChild(b); g2.appendChild(c);
+        if (it.category !== 'skin') c.querySelector('img').onclick = function () { sheet.tryId = it.id; sheet.tryName = it.name; renderSheet(); };
+      });
+    } else if (k === 'wardrobe') {
+      tabs(['pet', 'hat', 'clothes', 'costume', 'skin']);
+      if (sheet.tab === 'pet') {
+        if (NATIVE) body.appendChild(overlayBox()); // 화면 친구는 안드로이드 앱 전용: 웹/아이폰에선 메뉴를 숨겨요
+        var gp = el('div', 'grid'); body.appendChild(gp);
+        D.pets.forEach(function (p) {
+          var on = S.pet === p.id;
+          var c = el('div', 'card' + (on ? ' on' : ''), '<img class="thumb av" src="' + ASSET + p.avatar + '" alt=""><div class="nm">' + esc(p.name) + '</div><div class="sub">포즈 ' + p.poses.length + '개</div>');
+          var b = el('button', on ? '' : 'primary', on ? '함께하는 중' : '함께하기'); b.disabled = on;
+          b.onclick = function () { selectPet(p.id); renderSheet(); }; c.appendChild(b); gp.appendChild(c);
+        });
+        return;
+      }
+      var mine = D.items.filter(function (i) { return tabOf(i) === sheet.tab && owned(i); });
+      if (!mine.length) { body.appendChild(el('div', 'empty', '아직 ' + CAT_NAMES[sheet.tab] + '이(가) 없어요. 상점에서 사 오세요!')); return; }
+      var g3 = el('div', 'grid'); body.appendChild(g3);
+      mine.forEach(function (it) {
+        var on = equipped(it);
+        var c = el('div', 'card' + (on ? ' on' : ''), '<img class="thumb" src="' + ASSET + it.img + '" alt="" style="' + thumbStyle(it) + '"><div class="nm">' + esc(it.name) + '</div>');
+        var b = el('button', on ? '' : 'primary', on ? (it.category === 'skin' ? '입는 중' : '벗기') : '입히기');
+        if (on && it.category === 'skin' && it.id === defaultSkin()) b.disabled = true;
+        b.onclick = function () { toggleEquip(it.id); renderSheet(); }; c.appendChild(b); g3.appendChild(c);
+      });
+    } else if (k === 'mission') {
+      tabs(null);
+      body.appendChild(el('div', 'sub', '<p style="margin:0 0 8px;color:#9a8c9c;font-size:13px">매일 밤 12시에 새 미션으로 바뀌어요</p>'));
+      D.missions.forEach(function (m) {
+        var p = prog(m), r = el('div', 'mrow');
+        var rew = '보상: ' + m.coins + ' 코인' + (m.snack && snackById[m.snack] ? ' + ' + snackById[m.snack].name + ' ' + (m.snackCount || 1) + '개' : '');
+        r.innerHTML = '<div class="info"><div class="t">' + esc(m.title) + '</div><div class="r">' + rew + ' · ' + p.p + '/' + m.target + '</div><div class="track"><div class="fill" style="width:' + (p.p / m.target * 100) + '%"></div></div></div>';
+        var b = el('button', canClaim(m) ? 'primary' : '', p.c ? '완료 ✓' : canClaim(m) ? '받기' : '진행 중');
+        b.disabled = !canClaim(m); b.onclick = function () { claim(m); renderSheet(); }; r.appendChild(b); body.appendChild(r);
+      });
+    } else if (k === 'profile') {
+      tabs(null);
+      var cu = HPAuth.current();
+      if (!cu) { body.appendChild(el('div', 'empty', '로그인하지 않았어요')); return; }
+      var pc = el('div', 'ovl', '<b>' + esc(cu.nick) + '</b><br>프로필 사진: ' + esc(petName()) + ' (함께하는 캐릭터)<br><span class="note">이 폰 안에만 저장돼요. 다른 폰과는 공유되지 않아요.</span>');
+      body.appendChild(pc);
+      var bs = el('div', 'btns'), lo = el('button', 'primary', '로그아웃 / 친구 바꾸기'); lo.onclick = logout; bs.appendChild(lo); pc.appendChild(bs);
+      var pw = el('div', 'ovl', '<b>비밀번호 바꾸기</b><div class="pinRow"><input id="pinOld" inputmode="numeric" maxlength="4" placeholder="지금 비밀번호" type="password"><input id="pinNew" inputmode="numeric" maxlength="4" placeholder="새 비밀번호 4자리" type="password"></div>');
+      var cb = el('button', '', '바꾸기'); cb.onclick = function () { var r = HPAuth.changePin($('pinOld').value, $('pinNew').value); toast(r.ok ? '비밀번호를 바꿨어요' : r.msg); if (r.ok) renderSheet(); };
+      var b2 = el('div', 'btns'); b2.appendChild(cb); pw.appendChild(b2); body.appendChild(pw);
+      var dl = el('div', 'ovl', '<b>프로필 지우기</b><br><span class="note">저장 기록(코인, 옷, 호감도)이 모두 사라져요.</span><div class="pinRow"><input id="pinDel" inputmode="numeric" maxlength="4" placeholder="비밀번호" type="password"></div>');
+      var db = el('button', '', '이 프로필 지우기'); db.onclick = function () {
+        if (!confirm(cu.nick + ' 프로필을 정말 지울까요?')) return;
+        var r = HPAuth.remove(cu.id, $('pinDel').value); if (!r.ok) { toast(r.msg); return; }
+        S = null; nCall('setOverlay', false, overlayCfg()); location.reload();
+      };
+      var b3 = el('div', 'btns'); b3.appendChild(db); dl.appendChild(b3); body.appendChild(dl);
+      // 백업 코드: 아이폰은 오래 안 열면 기록이 지워질 수 있어서, 코드로 복사해 두고 다시 불러올 수 있어요
+      var bk = el('div', 'ovl', '<b>🔑 백업 코드</b><br><span class="note">' + (NATIVE ? '폰을 바꾸거나 앱을 지울 때' : '아이폰은 오래 안 열면 기록이 지워질 수 있어요.') +
+        ' 코드를 카톡 나에게 보내기나 메모에 붙여 두면, 로그인 화면의 "백업 코드로 불러오기"로 되살릴 수 있어요. (비밀번호도 그대로예요)</span><textarea id="bkCode" readonly placeholder="아래 버튼을 눌러 주세요"></textarea>');
+      var mk = el('button', 'primary', '백업 코드 만들고 복사');
+      mk.onclick = function () {
+        save(); var code = HPAuth.exportCode(), ta = $('bkCode'); ta.value = code;
+        var done = function () { toast('백업 코드를 복사했어요! 메모나 카톡에 붙여 두세요'); };
+        try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, function () { ta.focus(); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { toast('코드를 길게 눌러 복사해 주세요'); } }); return; } } catch (e) {}
+        ta.focus(); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { toast('코드를 길게 눌러 복사해 주세요'); }
+      };
+      var b4 = el('div', 'btns'); b4.appendChild(mk); bk.appendChild(b4); body.appendChild(bk);
+      if (!NATIVE) { var ins = el('div', 'ovl', '<b>📲 설치 방법</b><br><span class="note">홈 화면에 추가하는 방법, 안드로이드 앱 받는 방법</span><div class="btns"><a class="btnLink" href="install.html">설치 방법 보기</a></div>'); body.appendChild(ins); }
+    } else if (k === 'game') {
+      tabs(null);
+      var gg = el('div', 'grid games'); body.appendChild(gg);
+      Object.keys(MINI.games).forEach(function (kk) {
+        var gm = MINI.games[kk], c = el('div', 'card', '<div class="gIco">' + gm.icon + '</div><div class="nm">' + gm.name + '</div><div class="sub">최고 ' + ((S.bests && S.bests[kk]) || 0) + '점</div>');
+        var b = el('button', 'primary', '하기'); b.onclick = function () { closeSheet(); MINI.start(kk); }; c.appendChild(b); gg.appendChild(c);
+      });
+      body.appendChild(el('div', 'sub', '<p style="margin:10px 0 0;color:#9a8c9c;font-size:13px;text-align:center">' + esc(petName()) + '와 함께 놀아요! 점수만큼 코인을 받아요</p>'));
+    }
+  }
+  function thumbStyle(it) { // 새 옷 그림은 딱 맞게 잘라 둬서 통째로 보여 주기
+    return it.category === 'skin' ? '' : 'object-fit:contain;padding:4px;box-sizing:border-box;';
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('#bottom button'), function (b) {
+    b.addEventListener('click', function () { var k = b.getAttribute('data-open'); if (sheet.kind === k) closeSheet(); else openSheet(k); });
+  });
+  $('sheetClose').onclick = closeSheet;
+  $('petName').onclick = function () { openSheet('wardrobe', 'pet'); };
+  $('profBtn').onclick = function () { if (sheet.kind === 'profile') closeSheet(); else openSheet('profile'); };
+
+  // ───────── 화면 친구 (안드로이드: 앱을 꺼도 화면 위를 돌아다니기) ─────────
+  var NATIVE = window.HPNative || null;
+  function nCall(fn, a, b) { try { return NATIVE && NATIVE[fn] ? NATIVE[fn](a, b) : null; } catch (e) { console.warn(e); return null; } }
+  function overlayCfg() {
+    // 화면 친구: 움직일 땐 서 있는 그림에 옷·모자를 겹쳐 그린 그림(앱에서 미리 합쳐 보냄), 멈추면 옷 입은 앉은 그림
+    var c = curPet(), list = c.poses.map(function (q) {
+      var o = { id: q.id, img: 'www/assets/' + q.img, tags: q.tags, footY: q.footY || 0, cx: q.cx, bottom: q.bottom, headTop: q.headTop };
+      var cp = composite(q); if (cp) { o.img = cp.img; o.footY = cp.map(o.footY); o.cx = cp.mapX(q.cx); o.bottom = cp.map(q.bottom); o.headTop = cp.map(q.headTop); }
+      return o;
+    });
+    var dp = dressFor(c.poses[0]);
+    if (dp !== c.poses[0]) list.push({ id: 'dress', img: 'www/assets/' + dp.img, tags: [], footY: 0, cx: dp.cx, bottom: dp.bottom, headTop: dp.headTop });
+    return JSON.stringify({ id: c.id, name: c.name, poses: list, lines: ovLines(c.id) });
+  }
+  function composite(q) { // 포즈 그림 + 옷 + 모자를 512 그림 한 장으로 (모자가 위로 나가면 조금 줄여서 다 들어가게)
+    if (q.outfit === false || (!itemLayer(S.equip.clothes, q) && !itemLayer(S.equip.hat, q))) return null;
+    var tall = document.createElement('canvas'); tall.width = 512; tall.height = 512 + LMY;
+    var tg = tall.getContext('2d'); tg.translate(0, LMY); drawFigure(tg, q, 0, false, 10, null);
+    var a = tg.getImageData(0, 0, 512, 512 + LMY).data, top = 512 + LMY;
+    for (var y = 0; y < 512 + LMY && top === 512 + LMY; y++) for (var x = 0; x < 512; x += 2) if (a[(y * 512 + x) * 4 + 3] > 20) { top = y; break; }
+    var minY = top - LMY - 4, k = minY < 0 ? 512 / (512 - minY) : 1;
+    var c = document.createElement('canvas'); c.width = 512; c.height = 512; var g = c.getContext('2d');
+    g.translate(256 * (1 - k), 512 * (1 - k)); g.scale(k, k); drawFigure(g, q, 0, false, 10, null);
+    var url; try { url = c.toDataURL('image/webp', 0.9); if (url.indexOf('image/webp') < 0) url = c.toDataURL('image/png'); } catch (e) { return null; }
+    return { img: url, map: function (v) { return v ? 512 - (512 - v) * k : 0; }, mapX: function (v) { return 256 + (v - 256) * k; } };
+  }
+  function ovLines(id) {
+    var pl = (D.petLines && D.petLines[id]) || {}, o = {};
+    ['pet', 'tap', 'happy', 'sleep', 'hungry', 'idle', 'greet'].forEach(function (k) { o[k] = pl[k] || D.lines[k]; });
+    o.overlay = pl.idle ? pl.idle.concat(pl.tap || []) : D.lines.overlay;
+    return o;
+  }
+  function nativeSync() { if (NATIVE) nCall('updatePet', overlayCfg()); }
+  function overlayBox() {
+    var d = el('div', 'ovl');
+    if (!NATIVE) { d.innerHTML = '<b>화면 친구</b><br>앱을 꺼도 ' + esc(iga(petName())) + ' 핸드폰 화면 위를 돌아다녀요.<br><span class="note">안드로이드 앱에서만 쓸 수 있어요.</span>'; return d; }
+    var on = !!nCall('isOverlayOn'), perm = !!nCall('hasOverlayPermission');
+    d.innerHTML = '<b>화면 친구 ' + (on ? '켜짐 ✓' : '꺼짐') + '</b><br>앱을 꺼도 ' + esc(iga(petName())) + ' 화면 위를 걸어 다녀요. 톡 누르면 말하고, 두 번 톡 누르면 앱이 열려요.' +
+      (perm ? '' : '<br><span class="note">처음에는 "다른 앱 위에 표시" 허용이 필요해요.</span>');
+    var bs = el('div', 'btns'), t = el('button', on ? '' : 'primary', on ? '화면 친구 끄기' : '화면 친구 켜기');
+    t.onclick = function () {
+      if (on) { nCall('setOverlay', false, overlayCfg()); toast('화면 친구를 껐어요'); }
+      else {
+        var r = nCall('setOverlay', true, overlayCfg());
+        if (r === 'need_permission') toast('"다른 앱 위에 표시"를 허용하고 돌아오면 켜져요');
+        else toast('켜졌어요! 앱을 나가면 ' + iga(petName()) + ' 화면에 나타나요');
+      }
+      setTimeout(refreshOpenSheet, 300);
+    };
+    bs.appendChild(t);
+    if (!perm) { var p = el('button', '', '권한 설정 열기'); p.onclick = function () { nCall('openOverlaySettings'); }; bs.appendChild(p); }
+    d.appendChild(bs); return d;
+  }
+
+  // ───────── 놀이 (minigames.js) ─────────
+  var MINI = window.HP_MINI({
+    D: D, img: img, ready: ready, drawChar: drawChar, curId: function () { return curPet().id; },
+    pet: function (id) { return petById[id] || D.pets[0]; },
+    say: function () {},
+    finish: function (kind, score, coins, win) {
+      if (!S.bests) S.bests = {};
+      var best = score > (S.bests[kind] || 0); S.bests[kind] = Math.max(S.bests[kind] || 0, score);
+      S.coins += coins; report('play', 1);
+      if (kind === 'catch') report('score', score);
+      if (kind === 'memory' && win) report('memory', 1);
+      S.mood = Math.min(100, S.mood + (win ? 12 : 6)); if (win) addAffection(2);
+      save(); updateHud(); lastMini = win ? 'win' : 'lose';
+      $('miniEndTitle').textContent = win ? '잘했어요!' : '놀이 끝!';
+      $('miniResult').innerHTML = MINI.games[kind].name + ' ' + score + '점<br>+' + coins + ' 코인' + (best && score > 0 ? '<br>🎉 최고 기록!' : '');
+      var who = $('miniWho'); who.src = ASSET + curPet().avatar;
+      $('miniLine').textContent = line(win ? 'win' : 'lose');
+      $('miniEnd').classList.remove('hidden');
+    },
+  });
+  var lastMini = null;
+  function closeMini() { MINI.stop(); $('miniEnd').classList.add('hidden'); if (lastMini) { pet.happy = lastMini === 'win' ? 1.5 : 0; talk(lastMini, 2.8); lastMini = null; } }
+  $('miniOk').onclick = closeMini;
+  $('miniAgain').onclick = function () { $('miniEnd').classList.add('hidden'); lastMini = null; MINI.again(); };
+  $('miniQuit').onclick = function () { if (MINI.over()) closeMini(); else MINI.stop(); };
+
+  // 안드로이드 뒤로 가기 버튼: 열린 창이 있으면 닫기 (true = 처리함)
+  window.hpBack = function () {
+    if (MINI.running()) { if (MINI.over()) closeMini(); else MINI.stop(); return true; }
+    if (sheet.kind) { closeSheet(); return true; }
+    save(); return false;
+  };
+  window.hpPause = function () { save(); };
+
+  // ───────── 시작 / 반복 ─────────
+  var last = 0, acc = { save: 0, daily: 0, hud: 0 };
+  function loop(now) {
+    var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016; last = now;
+    timeStep(); update(dt); draw(); drawTry();
+    acc.save += dt; acc.daily += dt; acc.hud += dt;
+    if (acc.save >= 20) { acc.save = 0; save(); }
+    if (acc.daily >= 5) { acc.daily = 0; checkDaily(); }
+    if (acc.hud >= 0.25) { acc.hud = 0; updateHud(); }
+    requestAnimationFrame(loop);
+  }
+  document.addEventListener('visibilitychange', function () { if (!started) return; if (document.hidden) save(); else { timeStep(); checkDaily(); updateHud(); refreshOpenSheet(); } });
+  window.hpResume = function () { refreshOpenSheet(); };
+  window.addEventListener('pagehide', save);
+  window.addEventListener('resize', resize);
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // 테스트용 (개발자 도구 콘솔에서 사용): HP.addCoins(500), HP.skipHours(3), HP.nextDay(), HP.reset()
+  window.HP = {
+    drawChar: drawChar, itemLayer: itemLayer, equip: function (o) { Object.keys(o).forEach(function (k) { S.equip[k] = o[k]; }); },
+    state: function () { return S; }, save: save, feed: feed, buyItem: buyItem, buySnack: buySnack, toggleEquip: toggleEquip, claim: function (id) { claim(D.missions.filter(function (m) { return m.id === id; })[0]); },
+    addCoins: function (n) { S.coins += n; save(); updateHud(); },
+    skipHours: function (h) { offline(h); save(); updateHud(); },
+    nextDay: function () { S.missionDate = ''; checkDaily(); },
+    reset: function () { localStorage.removeItem(SAVE_KEY); newGame(); checkDaily(); save(); updateHud(); },
+    pet: pet, selectPet: selectPet, say: say, mini: MINI, auth: window.HPAuth, line: line, curPose: function () { return curPose().id; }, openSheet: openSheet, closeSheet: closeSheet, level: level,
+  };
+
+  // ───────── 로딩 화면: 친구 3명이 달려가요 ─────────
+  var splash = { on: true, t: 0, last: 0, who: [] };
+  (function () {
+    var ids = D.pets.map(function (p) { return p.id; });
+    for (var i = 0; i < 3; i++) splash.who.push(ids.splice(Math.floor(Math.random() * ids.length), 1)[0]);
+    splash.who.forEach(function (id) { img(petById[id].poses[0].img); });
+  })();
+  function splashLoop(now) {
+    if (!splash.on) return;
+    var c = $('splashCv'), g = c.getContext('2d'), r = c.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    if (c.width !== Math.round(r.width * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
+    var dt = splash.last ? Math.min(0.05, (now - splash.last) / 1000) : 0.016; splash.last = now; splash.t += dt;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height);
+    var size = Math.min(r.width * 0.3, 150), span = r.width + size * 3.2, foot = r.height * 0.8;
+    g.fillStyle = '#bfe3a8'; g.fillRect(0, foot - 2, r.width, r.height - foot + 2);
+    splash.who.forEach(function (id, i) {
+      var x = ((splash.t * r.width * 0.42 + i * size * 0.95) % span) - size;
+      drawChar(g, { pd: petById[id].poses[0], x: x, foot: foot + Math.sin(splash.t * 16 + i) * 1.5, size: size * (i === 1 ? 1 : 0.88), face: 1, walking: true, run: true, t: splash.t + i * 0.3, plain: true });
+    });
+    $('splashFill').style.width = Math.round(Math.min(1, Math.max(loadProgress, splash.t / 2)) * 100) + '%';
+    requestAnimationFrame(splashLoop);
+  }
+  requestAnimationFrame(splashLoop);
+  function hideSplash() {
+    var sp = $('splash'); sp.classList.add('fade');
+    setTimeout(function () { splash.on = false; sp.classList.add('hidden'); }, 450);
+  }
+
+  // ───────── 프로필 (로그인) ─────────
+  function boot() {
+    var cur = window.HPAuth && HPAuth.current();
+    if (!cur) { HPAuth.show(function (info) { start(info); }); return; }
+    start();
+  }
+  function logout() { save(); HPAuth.logout(); nCall('setOverlay', false, overlayCfg()); location.reload(); }
+
+  function start(info) {
+    var cur = window.HPAuth && HPAuth.current();
+    if (cur) SAVE_KEY = HPAuth.saveKey(cur.id);
+    var existed = load(); started = true;
+    if (!existed && info && info.pet && petById[info.pet]) S.pet = info.pet;
+    if (cur) { HPAuth.setPet(S.pet); hudProf = ''; }
+    if (info && info.migrated) toast('예전 저장 기록을 ' + cur.nick + ' 프로필로 옮겼어요');
+    offline((Date.now() - S.lastSave) / 3600000); refundNote();
+    lastTick = Date.now();
+    checkDaily(); if (!existed) say('안녕! 나는 ' + petName() + '! 잘 부탁해요~', 3.5, 'greet'); else talk('greet', 3);
+    resize(); var b = bounds(); pet.x = pet.tx = (b.x0 + b.x1) / 2; pet.y = pet.ty = (b.y0 + b.y1) / 2;
+    updateHud(); updateDot(); save(); nativeSync();
+    requestAnimationFrame(loop);
+  }
+  var fontReady = (document.fonts && document.fonts.load) ? document.fonts.load('20px Jua', '가') : Promise.resolve();
+  var minSplash = new Promise(function (r) { setTimeout(r, 2000); });
+  Promise.all([Promise.race([fontReady, new Promise(function (r) { setTimeout(r, 2500); })]), preload(), minSplash])
+    .then(function () { hideSplash(); boot(); }, function (e) { console.warn(e); hideSplash(); boot(); });
+})();

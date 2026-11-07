@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#ffe3ea">
+<title>놀자! 먼작귀</title>
+<link rel="icon" href="icon.png">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="놀자! 먼작귀">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div id="appTitle">놀자! 먼작귀</div>
+    <div class="row">
+      <button id="petName">캐릭터</button>
+      <div id="levelName" class="chip">처음 만남</div>
+      <div class="spacer"></div>
+      <button id="profBtn" class="chip hidden"></button>
+      <div id="coins" class="chip coin"><img src="assets/ui/ui_coin.png" alt=""><span id="coinText">0</span></div>
+    </div>
+    <div class="bars">
+      <div class="bar"><span class="lbl">호감도 <b id="lvText">Lv.1</b></span><div class="track"><div id="affFill" class="fill aff"></div></div></div>
+      <div class="bar"><span class="lbl">배부름</span><div class="track"><div id="hungerFill" class="fill hunger"></div></div></div>
+      <div class="bar"><span class="lbl">기분</span><div class="track"><div id="moodFill" class="fill mood"></div></div></div>
+    </div>
+  </header>
+  <main id="stage">
+    <canvas id="cv"></canvas>
+    <div id="bubble" class="hidden"></div>
+    <div id="toasts"></div>
+    <section id="sheet" class="hidden">
+      <div class="sheetHead"><h2 id="sheetTitle"></h2><button id="sheetClose" aria-label="닫기">✕</button></div>
+      <div id="tabs"></div>
+      <div id="sheetBody"></div>
+    </section>
+  </main>
+  <nav id="bottom">
+    <button data-open="snack"><span class="ico"><img src="assets/snacks/snack_cookie.png" alt=""></span>간식</button>
+    <button data-open="mission"><span class="ico"><img src="assets/ui/ui_mission.png" alt=""></span>미션<i id="missionDot" class="dot hidden"></i></button>
+    <button data-open="shop"><span class="ico"><img src="assets/ui/ui_shop.png" alt=""></span>상점</button>
+    <button data-open="wardrobe"><span class="ico"><img src="assets/ui/ui_wardrobe.png" alt=""></span>옷장</button>
+    <button data-open="game"><span class="ico"><img src="assets/ui/ui_star.png" alt=""></span>놀이</button>
+  </nav>
+  <section id="mini" class="hidden">
+    <canvas id="miniCv"></canvas>
+    <div id="miniHud"><span id="miniTime">25초</span><span id="miniTitle"></span><span id="miniScore">0점</span></div>
+    <button id="miniQuit" aria-label="그만하기">✕</button>
+    <div id="miniHelp" class="hidden"></div>
+    <div id="miniEnd" class="hidden"><div class="card"><h2 id="miniEndTitle">놀이 끝!</h2><img id="miniWho" alt=""><p id="miniLine" class="say"></p><p id="miniResult"></p><button id="miniAgain">한 판 더</button> <button id="miniOk" class="primary">좋아요</button></div></div>
+  </section>
+</div>
+<section id="login" class="hidden"></section>
+<section id="splash"><div class="spTitle">놀자! 먼작귀</div><canvas id="splashCv"></canvas><div class="spBar"><div id="splashFill"></div></div><div class="spSub">불러오는 중…</div></section>
+<script src="pwa.js"></script>
+<script src="data.js"></script>
+<script src="auth.js"></script>
+<script src="minigames.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
