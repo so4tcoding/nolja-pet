@@ -139,3 +139,8 @@ button { font-family: inherit; color: inherit; border: 0; cursor: pointer; }
 .lgInstall { margin-top: 6px; color: #e0708f; font-size: 14px; text-decoration: underline; }
 input, textarea, select { font-size: 16px; } /* 아이폰 입력할 때 확대 방지 */
 button, a { touch-action: manipulation; }
+/* v1.8 업데이트 예정 옷: 그림 대신 물음표 */
+.card .thumb.qmark { width: 64px; height: 64px; margin: 0 auto 4px; border-radius: 14px; background: #f1e9ec; color: #b9a9b0; font-size: 40px; line-height: 64px; text-align: center; font-family: 'Jua', sans-serif; }
+.card.soon { opacity: .75; }
+.card.soon .sub { color: #b9a9b0; }
+.card .sub .only { display: inline-block; background: #ffe3ea; color: #e0708f; border-radius: 8px; padding: 0 5px; font-size: 11px; }

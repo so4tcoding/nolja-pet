@@ -60,6 +60,15 @@
     var OLD = { hat_ribbon: 30, hat_straw: 60, hat_crown: 150, clothes_scarf: 40, clothes_overalls: 80, clothes_raincoat: 120, acc_glasses: 50, acc_flower: 35 }, back = 0;
     S.owned = S.owned.filter(function (id) { if (OLD[id] !== undefined && !itemById[id]) { back += OLD[id]; return false; } return true; });
     if (back) { S.coins = (S.coins | 0) + back; S.refund = back; }
+    // v1.8: 사용자가 그린 12벌만 남기고 나머지 옷·모자·세트는 '업데이트 예정' → 이미 산 건 코인 돌려주기 (한 번만)
+    if (!S.v18) {
+      var back2 = 0, viaSet = {};
+      S.owned.forEach(function (id) { var it = itemById[id]; if (it && it.set && it.soon) { back2 += it.price; it.set.forEach(function (x) { viaSet[x] = 1; var p = itemById[x]; if (p && !p.soon) { back2 -= p.price; if (S.owned.indexOf(x) < 0) S.owned.push(x); } }); } });
+      S.owned = S.owned.filter(function (id) { var it = itemById[id]; if (!it || !it.soon) return true; if (!it.set && !viaSet[id]) back2 += it.price; return false; });
+      back2 = Math.max(0, back2); if (back2) { S.coins = (S.coins | 0) + back2; S.refund = (S.refund || 0) + back2; }
+      S.v18 = 1;
+    }
+    ['hat', 'clothes'].forEach(function (c) { var it = itemById[S.equip[c]]; if (it && it.soon) S.equip[c] = ''; });
     S.equip.acc = '';
     if (!petById[S.pet]) S.pet = D.pets[0].id;
     S.hunger = clamp(+S.hunger || 0, 0, 100); S.mood = clamp(+S.mood || 0, 0, 100); S.coins = Math.max(0, S.coins | 0);
@@ -88,7 +97,7 @@
     if (hours >= 1) toast(Math.floor(hours) + '시간 만이에요! 보고 싶었어요~');
     else if (hours >= 10 / 60) toast(Math.floor(hours * 60) + '분 만이에요! 어서 와요~');
   }
-  function refundNote() { if (S && S.refund) { toast('옷이 새로 바뀌었어요! 예전 옷 값 ' + S.refund + '코인을 돌려줬어요'); delete S.refund; save(); } }
+  function refundNote() { if (S && S.refund) { toast('옷이 새로 바뀌었어요! 업데이트 예정인 옷 값 ' + S.refund + '코인을 돌려줬어요'); delete S.refund; save(); } }
   function timeStep() {
     var now = Date.now(), h = (now - lastTick) / 3600000;
     lastTick = now;
@@ -169,7 +178,7 @@
   }
   function owned(it) { return S.owned.indexOf(it.id) >= 0; }
   function buyItem(id) {
-    var it = itemById[id]; if (!it || owned(it)) return;
+    var it = itemById[id]; if (!it || owned(it) || it.soon) return;
     if (S.coins < it.price) { toast('코인이 부족해요'); return; }
     S.coins -= it.price;
     if (it.set) { it.set.forEach(function (x) { if (S.owned.indexOf(x) < 0) S.owned.push(x); var p = itemById[x]; if (p) S.equip[p.category] = x; }); S.owned.push(it.id); }
@@ -180,11 +189,12 @@
   }
   function equipped(it) { return S.equip[it.category] === it.id; }
   function toggleEquip(id) {
-    var it = itemById[id]; if (!it || !owned(it)) return;
+    var it = itemById[id]; if (!it || !owned(it) || it.soon) return;
+    if (it.wear && it.only !== curPet().id) { toast(petById[it.only].name + '만 입을 수 있어요 (다른 친구는 업데이트 예정)'); return; }
     if (equipped(it)) {
       if (it.category === 'skin') { if (it.id === defaultSkin()) return; S.equip.skin = defaultSkin(); }
       else S.equip[it.category] = '';
-    } else S.equip[it.category] = it.id;
+    } else { S.equip[it.category] = it.id; if (it.wear) S.equip.hat = ''; }
     report('dress', 1); wake(); pet.happy = 1.2; pet.hop = 0.01; talk('dress', 2.6); save(); nativeSync();
   }
 
@@ -237,14 +247,25 @@
     d.color = petById[d.char] ? petById[d.char].poses[0].color : '#ffffff';
     dressBy[d.char + '|' + d.clothes] = d;
   });
+  // v1.8 옷 입고 서 있는 그림 (사용자 그림 그대로): 걷기·기본·말하기 모두 이 그림 한 장, 멈춰 있으면 앉은 그림(있을 때만)
+  var wearBy = {};
+  (D.wear || []).forEach(function (w) {
+    w._char = w.char; w.id = 'wear'; w.dress = true; w.wear = true; w.outfit = true; w.closeEyes = true; w.tags = ['walk', 'idle', 'greet', 'tap'];
+    w.color = petById[w.char] ? petById[w.char].poses[0].color : '#ffffff';
+    wearBy[w.char + '|' + w.clothes] = w;
+  });
+  function wearFor() {
+    var it = S && itemById[S.equip.clothes];
+    return (it && it.wear && it.only === curPet().id && wearBy[it.only + '|' + it.id]) || null;
+  }
   function dressFor(pd) {
     if (!S || !pd || !pd._char) return pd;
-    var d = dressBy[pd._char + '|' + S.equip.clothes];
-    if (!d || (d.hat && S.equip.hat !== d.hat)) return pd;
-    return d;
+    var it = itemById[S.equip.clothes]; if (!it || !it.wear || it.only !== pd._char) return pd;
+    return dressBy[pd._char + '|' + it.id] || pd;    // 같은 옷의 앉은 그림(예전 참고 그림)이 있으면 멈춰 있을 때 그걸로
   }
   function curPose() { return (pet.mix || 0) > 0.5 ? dressFor(basePose()) : basePose(); }
   function basePose() {
+    var w = wearFor(); if (w) return w;
     var ps = curPet().poses;
     if (!pet.walking) for (var i = 0; i < ps.length; i++) if (ps[i].id === pet.pose) return ps[i];
     return ps[0];
@@ -387,105 +408,10 @@
     var p = function (h) { h = h.replace('#', ''); return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); }); };
     var x = p(a), y = p(b || '#ffffff'); return 'rgb(' + x.map(function (v, i) { return Math.round(v * y[i] / 255); }).join(',') + ')';
   }
-  // ───────── 옷 입히기 ─────────
-  // 옷 그림은 치이카와·하치와레·우사기 몸에 맞춰 그려져 있어요.
-  // 캐릭터마다 머리·눈·몸 위치(포즈 정보)로 크기와 위치를 계산하고, D.fit 표로 캐릭터·포즈별로 조금씩 보정해요.
-  var FIT0 = { body: { w: 1.18, h: 1.2, top: 0.07, dx: 0, dy: 0, grow: 12 }, hood: { s: 1, dx: 0, dy: 0, len: 1 }, hat: { w: 1, dx: 0, dy: 0, top: null } };
-  function fitFor(pd, type) {
-    var t = type === 'bottom' ? 'body' : type, o = {}, F = (D.fit && D.fit[pd._char]) || {};
-    [FIT0[t], (F.all || {})[t], (F[pd.id] || {})[t]].forEach(function (src) { if (src) Object.keys(src).forEach(function (k) { o[k] = src[k]; }); });
-    o.mode = ((F[pd.id] || {}).mode) || (F.all || {}).mode || 'all';
-    return o;
-  }
-  var silCache = {};
-  function silhouette(pd, grow) { // 몸 모양(조금 크게) — 옷이 몸 밖으로 많이 안 나가게 자르는 틀
-    var key = pd.img + '|' + grow;
-    if (!silCache[key]) {
-      var body = img(pd.img), c = document.createElement('canvas'); c.width = 512; c.height = 512;
-      var g = c.getContext('2d');
-      for (var a = 0; a < 16; a++) g.drawImage(body, Math.cos(a / 16 * Math.PI * 2) * grow, Math.sin(a / 16 * Math.PI * 2) * grow, 512, 512);
-      g.drawImage(body, 0, 0, 512, 512);
-      silCache[key] = c;
-    }
-    return silCache[key];
-  }
-  // 옷 그림을 512x512 캐릭터 좌표 어디에 그릴지: [x, y, 폭, 높이]
-  // 참고 그림(옷 입은 치이카와·하치와레·우사기)에서 잰 비율:
-  //  머리 아래쪽 = 눈 높이 + (눈 - 머리 꼭대기) x 0.62, 옷은 그 아래부터 바닥까지, 폭은 머리 폭의 약 3/4
-  function skullOf(pd) { return pd.hatTop || pd.headTop; }
-  function headBottom(pd) {
-    var ey = (pd.eyes[0][1] + pd.eyes[1][1]) / 2;
-    return clamp(ey + (ey - skullOf(pd)) * 0.62, ey + 30, pd.bottom - 70);
-  }
-  function itemBox(it, pd) {
-    var f = fitFor(pd, it.type), iw = it.w, ih = it.h;
-    if (it.type === 'hat') {
-      var top = f.top !== null && f.top !== undefined ? f.top : skullOf(pd), headH = headBottom(pd) - top;
-      var w = pd.headW * it.hw * f.w, h = ih * w / iw;
-      return [pd.cx - w / 2 + w * (it.hdx || 0) + f.dx, top + headH * it.hy - h + f.dy, w, h];
-    }
-    if (it.type === 'hood') {
-      var e = pd.eyes, r = pd.eyeR || 26, ed = Math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]);
-      var fx = (e[0][0] + e[1][0]) / 2 + f.dx, fy = (e[0][1] + e[1][1]) / 2 + r * 0.55 + f.dy;
-      var hx = it.hole[0], hy = it.hole[1], rx = it.hole[2];
-      // 머리를 다 덮을 만큼 크게, 그리고 얼굴(눈+볼)이 구멍 안에 들어올 만큼 크게
-      var kx = Math.max(pd.headW * 0.98 / it.hw, (ed / 2 + r * 1.9) / rx) * f.s * (it.hs || 1);   // 참고 그림: 후드는 머리에 딱 맞게
-      var ky = clamp((pd.bottom + 6 - fy) * f.len / (ih - hy), kx * 0.5, kx * 1.2);
-      // 머리 꼭대기(하치와레 머리털까지, 우사기는 귀만 빼고)를 후드가 덮도록
-      var cover = (((D.fit && D.fit[pd._char]) || {}).ears ? skullOf(pd) : pd.headTop) - 4, need = (fy - cover) / Math.max(10, hy - (it.htop || 0));
-      // 위쪽(얼굴 구멍 위)은 머리 높이에 맞춰 따로 늘려요 (머리가 큰 캐릭터라서)
-      var kyA = clamp(need, ky * 0.9, kx * 2);
-      return [fx - hx * kx, fy - hy * kyA, iw * kx, ih * ky, fx, fy, it.hole[2] * kx, it.hole[3] * (ky + kyA) / 2, kyA, ky, hy];
-    }
-    var ex = (pd.eyes[0][0] + pd.eyes[1][0]) / 2 + f.dx, top2 = headBottom(pd) - 10 + f.dy, base = pd.bottom + 3, avail = base - top2;
-    var w2 = pd.headW * 0.76 * f.w, h2 = ih * w2 / iw;
-    if (it.type === 'bottom') { w2 = pd.headW * 0.7 * f.w; h2 = Math.min(ih * w2 / iw, avail * 0.55); return [ex - w2 / 2, base - h2, w2, h2]; }
-    if (h2 > avail) {  // 참고 그림처럼 앉은 듯 짧게: 최대 절반까지 줄이고, 그래도 길면 폭도 같이 줄이기
-      if (h2 * 0.5 > avail) { w2 = avail / (ih / iw * 0.5); }
-      h2 = avail;
-    }
-    return [ex - w2 / 2, base - h2, w2, h2];
-  }
-  var layerCache = {}, LMX = 160, LMY = 300, LMB = 40;   // 옷 그림판은 캐릭터 그림(512)보다 넉넉하게 (모자가 머리 위로 나가도 안 잘리게)
-  function itemLayer(id, pd) {
-    var it = itemById[id]; if (!it || !it.img || pd.outfit === false) return null;
-    var mode = fitFor(pd, it.type).mode;
-    if (mode === 'none' || (mode === 'hat' && it.type !== 'hat')) return null;  // 이 포즈에선 안 어울리는 옷은 잠깐 숨기기
-    var src = img(it.img), body = img(pd.img);
-    if (!ready(src) || !ready(body)) return null;
-    var key = pd.img + '|' + it.id;
-    if (!layerCache[key]) {
-      var c = document.createElement('canvas'); c.width = 512 + LMX * 2; c.height = 512 + LMY + LMB;
-      var g = c.getContext('2d'), b = itemBox(it, pd); g.translate(LMX, LMY);
-      if (it.type === 'hood') { // 위·아래 두 조각으로 (위는 kyA, 아래는 ky 배율)
-        g.drawImage(src, 0, 0, it.w, b[10], b[0], b[5] - b[10] * b[8], b[2], b[10] * b[8]);
-        g.drawImage(src, 0, b[10], it.w, it.h - b[10], b[0], b[5], b[2], (it.h - b[10]) * b[9]);
-      } else g.drawImage(src, b[0], b[1], b[2], b[3]);
-      var FF = (D.fit && D.fit[pd._char]) || {};
-      if (it.type === 'hat' && FF.ears) { // 우사기: 긴 귀가 모자 위로 쏙 나오게 귀 부분을 모자 위에 다시 그리기
-        var sk = pd.earY || skullOf(pd), kk = body.naturalWidth / 512;
-        g.drawImage(body, 0, 0, 512 * kk, sk * kk, 0, 0, 512, sk);
-      }
-      if (it.type === 'body' || it.type === 'bottom') { g.globalCompositeOperation = 'destination-in'; g.drawImage(silhouette(pd, fitFor(pd, it.type).grow), 0, 0); }
-      if (it.type === 'hood') { // 얼굴 구멍: 캐릭터 얼굴이 보이게 뚫기 (가장자리는 부드럽게)
-        g.globalCompositeOperation = 'destination-out';
-        var gr = g.createRadialGradient(0, 0, 0.75, 0, 0, 1);
-        gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-        g.save(); g.translate(b[4], b[5]); g.scale(b[6] * 0.97, b[7] * 0.97); g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 1, 0, Math.PI * 2); g.fill(); g.restore();
-      }
-      if (it.type === 'hood') { g.globalCompositeOperation = 'destination-in'; g.fillRect(-LMX, -LMY, 512 + LMX * 2, LMY + pd.bottom + 6); } // 땅 아래로 안 내려가게
-      g.globalCompositeOperation = 'source-over';
-      var fr = ((D.fit && D.fit[pd._char]) || {}).front;   // 들고 있는 물건(컵·쟁반·책)은 옷 위로 다시 그리기
-      if (fr && pd.id === 'stand' && it.type !== 'hat') {
-        var t = document.createElement('canvas'); t.width = c.width; t.height = c.height; var tg = t.getContext('2d'); tg.translate(LMX, LMY);
-        fr.forEach(function (r) { tg.drawImage(body, r[0] * body.naturalWidth / 512, r[1] * body.naturalHeight / 512, (r[2] - r[0]) * body.naturalWidth / 512, (r[3] - r[1]) * body.naturalHeight / 512, r[0], r[1], r[2] - r[0], r[3] - r[1]); });
-        tg.globalCompositeOperation = 'destination-in'; tg.drawImage(c, -LMX, -LMY);
-        g.drawImage(t, -LMX, -LMY);
-      }
-      layerCache[key] = c;
-    }
-    return layerCache[key];
-  }
+  // ───────── 옷 ─────────
+  // v1.8: 옷은 사용자가 그린 '옷 입은 그림'(D.wear, D.dress)을 통째로만 써요. 옷 그림을 따로 겹쳐 그리지 않아요.
+  var LMX = 160, LMY = 300;
+  function itemLayer() { return null; }
   function mood() {
     if (pet.eat > 0) return 'eat';
     if (pet.happy > 0) return 'happy';
@@ -532,13 +458,14 @@
   }
   // 놀이·로딩 화면용: 발바닥 위치(x, foot)와 크기(size)로 그리기
   function drawChar(g, o) {
-    var pd = o.pd || curPet().poses[0], u = o.size / 512, t = o.t || 0;
+    var pd = o.pd || (!o.plain && wearFor()) || curPet().poses[0], u = o.size / 512, t = o.t || 0;
     if (!o.plain && o.dress !== false && !o.walking && !o.run) pd = dressFor(pd);   // 움직일 땐 항상 서 있는 그림
     var legs = o.walking && pd.footY > 0 && pd.footY < 505;
     g.save();
     g.fillStyle = 'rgba(80,50,70,0.13)'; g.beginPath(); g.ellipse(o.x, o.foot, o.size * 0.3, o.size * 0.05, 0, 0, 7); g.fill();
     g.translate(o.x + (o.shake || 0), o.foot);
     g.scale((o.face || 1) * u, u); g.translate(-256, -pd.bottom);
+    if (o.walking && !legs) g.translate(0, -Math.abs(Math.sin(t * (o.run ? 16 : 10))) * 20);   // 옷 입은 그림은 통째로 통통
     if (o.plain) { // 다른 캐릭터 (옷 없이)
       var im = img(pd.img);
       if (ready(im)) {
@@ -616,6 +543,9 @@
   function drawTry() { // 상점 미리보기: 지금 캐릭터가 고른 옷을 입은 모습 (저장은 안 바뀜)
     var c = sheet.kind === 'shop' && $('tryCv'); if (!c) return;
     var g = c.getContext('2d'), keep = { hat: S.equip.hat, clothes: S.equip.clothes }, it = itemById[sheet.tryId];
+    if (it && it.wear && it.only !== curPet().id) { // 다른 캐릭터 옷: 그 캐릭터가 입은 그림 그대로 보여 주기
+      var im = img(it.img); g.clearRect(0, 0, 300, 300); if (ready(im)) g.drawImage(im, 150 - 128, 290 - 256 * (wearBy[it.only + '|' + it.id].bottom / 512), 256, 256); return;
+    }
     if (it) (it.set || [it.id]).forEach(function (x) { var p = itemById[x]; if (p) S.equip[p.category] = x; });
     g.clearRect(0, 0, 300, 300);
     drawChar(g, { x: 150, foot: 284, size: 230, face: 1, t: pet.t });
@@ -656,12 +586,21 @@
         var c = el('div', 'card', (snackCount(s.id) ? '<span class="badge">' + snackCount(s.id) + '개</span>' : '') + '<img class="thumb" src="' + ASSET + s.img + '" alt=""><div class="nm">' + esc(s.name) + '</div><div class="sub">배부름 +' + s.hunger + ' · 호감 +' + s.aff + '</div>');
         var b = el('button', 'primary', '사기 ' + priceHtml(s.price)); b.disabled = S.coins < s.price; b.onclick = function () { buySnack(s.id); renderSheet(); }; c.appendChild(b); g2.appendChild(c);
       });
-      if (sheet.tab !== 'snack' && sheet.tab !== 'skin') { // 입어 보기 미리보기
-        var tw = el('div', 'tryOn', '<canvas id="tryCv" width="300" height="300"></canvas><div class="tryTxt"><b id="tryName">' + esc(sheet.tryName || '그림을 눌러 보세요') + '</b><br>옷 그림을 누르면 ' + esc(iga(petName())) + ' 미리 입어 봐요</div>');
+      var list = sheet.tab === 'snack' ? [] : D.items.filter(function (i) { return tabOf(i) === sheet.tab; });
+      // 입을 수 있는 옷 먼저 (지금 캐릭터 옷 → 다른 캐릭터 옷 → 업데이트 예정)
+      var rank = function (i) { return i.soon ? 2 : (i.wear && i.only !== curPet().id) ? 1 : 0; };
+      list = list.map(function (i, n) { return [i, n]; }).sort(function (a, b) { return rank(a[0]) - rank(b[0]) || a[1] - b[1]; }).map(function (x) { return x[0]; });
+      if (sheet.tab !== 'snack' && sheet.tab !== 'skin' && list.some(function (i) { return !i.soon; })) { // 입어 보기 미리보기
+        var tw = el('div', 'tryOn', '<canvas id="tryCv" width="300" height="300"></canvas><div class="tryTxt"><b id="tryName">' + esc(sheet.tryName || '그림을 눌러 보세요') + '</b><br>옷 그림을 누르면 입은 모습을 크게 봐요</div>');
         body.insertBefore(tw, g2);
       }
-      if (sheet.tab !== 'snack') D.items.filter(function (i) { return tabOf(i) === sheet.tab; }).forEach(function (it) {
-        var c = el('div', 'card' + (it.set ? ' set' : '') + (sheet.tryId === it.id ? ' trying' : ''), '<img class="thumb" src="' + ASSET + it.img + '" alt="" style="' + thumbStyle(it) + '"><div class="nm">' + esc(it.name) + '</div><div class="sub">' + esc(it.desc || '') + '</div>');
+      list.forEach(function (it) {
+        if (it.soon) { // 업데이트 예정: 그림 대신 물음표
+          var cs = el('div', 'card soon', '<div class="thumb qmark">?</div><div class="nm">' + esc(it.name) + '</div><div class="sub">업데이트 예정</div>');
+          var bs = el('button', '', '업데이트 예정'); bs.disabled = true; cs.appendChild(bs); g2.appendChild(cs); return;
+        }
+        var who = it.wear ? '<span class="only">' + esc(petById[it.only].name) + ' 전용</span> ' : '';
+        var c = el('div', 'card' + (it.set ? ' set' : '') + (sheet.tryId === it.id ? ' trying' : ''), '<img class="thumb" src="' + ASSET + it.img + '" alt="" style="' + thumbStyle(it) + '"><div class="nm">' + esc(it.name) + '</div><div class="sub">' + who + esc(it.desc || '') + '</div>');
         var b;
         if (owned(it) || (it.set && it.set.every(function (x) { return S.owned.indexOf(x) >= 0; }))) { b = el('button', '', '갖고 있어요'); b.disabled = true; }
         else { b = el('button', 'primary', '사기 ' + priceHtml(it.price)); b.disabled = S.coins < it.price; b.onclick = function () { buyItem(it.id); renderSheet(); }; }
@@ -669,7 +608,7 @@
         if (it.category !== 'skin') c.querySelector('img').onclick = function () { sheet.tryId = it.id; sheet.tryName = it.name; renderSheet(); };
       });
     } else if (k === 'wardrobe') {
-      tabs(['pet', 'hat', 'clothes', 'costume', 'skin']);
+      tabs(['pet', 'clothes', 'costume', 'skin']);
       if (sheet.tab === 'pet') {
         if (NATIVE) body.appendChild(overlayBox()); // 화면 친구는 안드로이드 앱 전용: 웹/아이폰에선 메뉴를 숨겨요
         var gp = el('div', 'grid'); body.appendChild(gp);
@@ -684,7 +623,12 @@
       var mine = D.items.filter(function (i) { return tabOf(i) === sheet.tab && owned(i); });
       if (!mine.length) { body.appendChild(el('div', 'empty', '아직 ' + CAT_NAMES[sheet.tab] + '이(가) 없어요. 상점에서 사 오세요!')); return; }
       var g3 = el('div', 'grid'); body.appendChild(g3);
+      mine.sort(function (a, b) { return (a.wear && a.only !== curPet().id ? 1 : 0) - (b.wear && b.only !== curPet().id ? 1 : 0); });
       mine.forEach(function (it) {
+        if (it.wear && it.only !== curPet().id) { // 다른 캐릭터가 그려진 옷: 이 캐릭터는 아직 못 입어요
+          var cl2 = el('div', 'card soon', '<div class="thumb qmark">?</div><div class="nm">' + esc(it.name) + '</div><div class="sub">' + esc(petById[it.only].name) + ' 전용 · ' + esc(petName()) + '는 업데이트 예정</div>');
+          var bl = el('button', '', '업데이트 예정'); bl.disabled = true; cl2.appendChild(bl); g3.appendChild(cl2); return;
+        }
         var on = equipped(it);
         var c = el('div', 'card' + (on ? ' on' : ''), '<img class="thumb" src="' + ASSET + it.img + '" alt="" style="' + thumbStyle(it) + '"><div class="nm">' + esc(it.name) + '</div>');
         var b = el('button', on ? '' : 'primary', on ? (it.category === 'skin' ? '입는 중' : '벗기') : '입히기');
@@ -754,27 +698,14 @@
   var NATIVE = window.HPNative || null;
   function nCall(fn, a, b) { try { return NATIVE && NATIVE[fn] ? NATIVE[fn](a, b) : null; } catch (e) { console.warn(e); return null; } }
   function overlayCfg() {
-    // 화면 친구: 움직일 땐 서 있는 그림에 옷·모자를 겹쳐 그린 그림(앱에서 미리 합쳐 보냄), 멈추면 옷 입은 앉은 그림
-    var c = curPet(), list = c.poses.map(function (q) {
-      var o = { id: q.id, img: 'www/assets/' + q.img, tags: q.tags, footY: q.footY || 0, cx: q.cx, bottom: q.bottom, headTop: q.headTop };
-      var cp = composite(q); if (cp) { o.img = cp.img; o.footY = cp.map(o.footY); o.cx = cp.mapX(q.cx); o.bottom = cp.map(q.bottom); o.headTop = cp.map(q.headTop); }
-      return o;
+    // 화면 친구: 옷을 입었으면 옷 입은 서 있는 그림 한 장(걸을 땐 통통), 멈추면 같은 옷의 앉은 그림(있을 때만)
+    var c = curPet(), w = wearFor(), list = c.poses.map(function (q) {
+      var p = w || q;
+      return { id: q.id, img: 'www/assets/' + p.img, tags: q.tags, footY: p.footY || 0, cx: p.cx, bottom: p.bottom, headTop: p.headTop };
     });
-    var dp = dressFor(c.poses[0]);
-    if (dp !== c.poses[0]) list.push({ id: 'dress', img: 'www/assets/' + dp.img, tags: [], footY: 0, cx: dp.cx, bottom: dp.bottom, headTop: dp.headTop });
+    var dp = w ? dressFor(w) : null;
+    if (dp && dp !== w) list.push({ id: 'dress', img: 'www/assets/' + dp.img, tags: [], footY: 0, cx: dp.cx, bottom: dp.bottom, headTop: dp.headTop });
     return JSON.stringify({ id: c.id, name: c.name, poses: list, lines: ovLines(c.id) });
-  }
-  function composite(q) { // 포즈 그림 + 옷 + 모자를 512 그림 한 장으로 (모자가 위로 나가면 조금 줄여서 다 들어가게)
-    if (q.outfit === false || (!itemLayer(S.equip.clothes, q) && !itemLayer(S.equip.hat, q))) return null;
-    var tall = document.createElement('canvas'); tall.width = 512; tall.height = 512 + LMY;
-    var tg = tall.getContext('2d'); tg.translate(0, LMY); drawFigure(tg, q, 0, false, 10, null);
-    var a = tg.getImageData(0, 0, 512, 512 + LMY).data, top = 512 + LMY;
-    for (var y = 0; y < 512 + LMY && top === 512 + LMY; y++) for (var x = 0; x < 512; x += 2) if (a[(y * 512 + x) * 4 + 3] > 20) { top = y; break; }
-    var minY = top - LMY - 4, k = minY < 0 ? 512 / (512 - minY) : 1;
-    var c = document.createElement('canvas'); c.width = 512; c.height = 512; var g = c.getContext('2d');
-    g.translate(256 * (1 - k), 512 * (1 - k)); g.scale(k, k); drawFigure(g, q, 0, false, 10, null);
-    var url; try { url = c.toDataURL('image/webp', 0.9); if (url.indexOf('image/webp') < 0) url = c.toDataURL('image/png'); } catch (e) { return null; }
-    return { img: url, map: function (v) { return v ? 512 - (512 - v) * k : 0; }, mapX: function (v) { return 256 + (v - 256) * k; } };
   }
   function ovLines(id) {
     var pl = (D.petLines && D.petLines[id]) || {}, o = {};
@@ -857,7 +788,7 @@
 
   // 테스트용 (개발자 도구 콘솔에서 사용): HP.addCoins(500), HP.skipHours(3), HP.nextDay(), HP.reset()
   window.HP = {
-    drawChar: drawChar, itemLayer: itemLayer, equip: function (o) { Object.keys(o).forEach(function (k) { S.equip[k] = o[k]; }); },
+    drawChar: drawChar, overlayCfg: overlayCfg, wearFor: wearFor, itemLayer: itemLayer, equip: function (o) { Object.keys(o).forEach(function (k) { S.equip[k] = o[k]; }); },
     state: function () { return S; }, save: save, feed: feed, buyItem: buyItem, buySnack: buySnack, toggleEquip: toggleEquip, claim: function (id) { claim(D.missions.filter(function (m) { return m.id === id; })[0]); },
     addCoins: function (n) { S.coins += n; save(); updateHud(); },
     skipHours: function (h) { offline(h); save(); updateHud(); },
