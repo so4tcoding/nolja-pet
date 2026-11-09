@@ -588,7 +588,7 @@
       });
       var list = sheet.tab === 'snack' ? [] : D.items.filter(function (i) { return tabOf(i) === sheet.tab; });
       // 입을 수 있는 옷 먼저 (지금 캐릭터 옷 → 다른 캐릭터 옷 → 업데이트 예정)
-      var rank = function (i) { return i.soon ? 2 : (i.wear && i.only !== curPet().id) ? 1 : 0; };
+      var rank = function (i) { return i.soon ? (i.only === curPet().id ? 0.5 : 2) : (i.wear && i.only !== curPet().id) ? 1 : 0; };
       list = list.map(function (i, n) { return [i, n]; }).sort(function (a, b) { return rank(a[0]) - rank(b[0]) || a[1] - b[1]; }).map(function (x) { return x[0]; });
       if (sheet.tab !== 'snack' && sheet.tab !== 'skin' && list.some(function (i) { return !i.soon; })) { // 입어 보기 미리보기
         var tw = el('div', 'tryOn', '<canvas id="tryCv" width="300" height="300"></canvas><div class="tryTxt"><b id="tryName">' + esc(sheet.tryName || '그림을 눌러 보세요') + '</b><br>옷 그림을 누르면 입은 모습을 크게 봐요</div>');
@@ -596,7 +596,7 @@
       }
       list.forEach(function (it) {
         if (it.soon) { // 업데이트 예정: 그림 대신 물음표
-          var cs = el('div', 'card soon', '<div class="thumb qmark">?</div><div class="nm">' + esc(it.name) + '</div><div class="sub">업데이트 예정</div>');
+          var cs = el('div', 'card soon', '<div class="thumb qmark">?</div><div class="nm">' + esc(it.name) + '</div><div class="sub">' + (it.only && petById[it.only] ? '<span class="only">' + esc(petById[it.only].name) + ' 전용</span> ' : '') + '업데이트 예정</div>');
           var bs = el('button', '', '업데이트 예정'); bs.disabled = true; cs.appendChild(bs); g2.appendChild(cs); return;
         }
         var who = it.wear ? '<span class="only">' + esc(petById[it.only].name) + ' 전용</span> ' : '';
@@ -677,6 +677,8 @@
     } else if (k === 'game') {
       tabs(null);
       var gg = el('div', 'grid games'); body.appendChild(gg);
+      var ca = el('div', 'card arCard', '<div class="gIco">📷</div><div class="nm">보물찾기 AR</div><div class="sub">카메라로 친구랑 보물 찾기</div>');
+      var ba = el('button', 'primary', '하기'); ba.onclick = function () { closeSheet(); AR.open(); }; ca.appendChild(ba); gg.appendChild(ca);
       Object.keys(MINI.games).forEach(function (kk) {
         var gm = MINI.games[kk], c = el('div', 'card', '<div class="gIco">' + gm.icon + '</div><div class="nm">' + gm.name + '</div><div class="sub">최고 ' + ((S.bests && S.bests[kk]) || 0) + '점</div>');
         var b = el('button', 'primary', '하기'); b.onclick = function () { closeSheet(); MINI.start(kk); }; c.appendChild(b); gg.appendChild(c);
@@ -762,7 +764,21 @@
   $('miniQuit').onclick = function () { if (MINI.over()) closeMini(); else MINI.stop(); };
 
   // 안드로이드 뒤로 가기 버튼: 열린 창이 있으면 닫기 (true = 처리함)
+  // ───────── 보물찾기 AR (ar.js) ─────────
+  var AR = window.HP_AR({
+    D: D, img: img, ready: ready, drawChar: drawChar, asset: ASSET,
+    reward: function () { // 보물 하나: 코인 또는 간식 + 호감도
+      var r;
+      if (Math.random() < 0.55) { var c = 10 + Math.floor(Math.random() * 16); S.coins += c; r = { text: '코인 +' + c, img: D.art.coin }; }
+      else { var sn = pick(D.snacks); addSnack(sn.id, 1); r = { text: sn.name + ' +1', img: sn.img }; }
+      addAffection(2); S.mood = Math.min(100, S.mood + 4); save(); updateHud(); return r;
+    },
+    finish: function (n) { report('play', 1); S.mood = Math.min(100, S.mood + 8); save(); updateHud(); },
+    closed: function () { save(); updateHud(); }
+  });
+  window.HP_ARX = AR;
   window.hpBack = function () {
+    if (AR.running()) { AR.close(); return true; }
     if (MINI.running()) { if (MINI.over()) closeMini(); else MINI.stop(); return true; }
     if (sheet.kind) { closeSheet(); return true; }
     save(); return false;

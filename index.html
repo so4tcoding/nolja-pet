@@ -57,6 +57,15 @@
     <div id="miniHelp" class="hidden"></div>
     <div id="miniEnd" class="hidden"><div class="card"><h2 id="miniEndTitle">놀이 끝!</h2><img id="miniWho" alt=""><p id="miniLine" class="say"></p><p id="miniResult"></p><button id="miniAgain">한 판 더</button> <button id="miniOk" class="primary">좋아요</button></div></div>
   </section>
+  <section id="ar" class="hidden">
+    <video id="arVid" playsinline muted autoplay></video>
+    <canvas id="arCv"></canvas>
+    <div id="arHud"><span id="arMode"></span><span id="arCount"></span></div>
+    <button id="arQuit" aria-label="나가기">✕</button>
+    <div id="arBubble" class="hidden"></div>
+    <div id="arStart"><div class="card"><h2>📷 보물찾기 AR</h2><p>카메라를 켜고 폰을 천천히 돌려 보세요.<br>먼작귀 친구를 찾아서 누르면<br>숨은 보물이 있는 곳을 알려 줘요!</p><button id="arGo" class="primary">시작하기</button></div></div>
+    <div id="arEnd" class="hidden"><div class="card"><h2 id="arEndTitle">보물을 다 찾았어요!</h2><img id="arWho" alt=""><p id="arLine" class="say"></p><p id="arResult"></p><button id="arAgain">한 번 더</button> <button id="arOk" class="primary">좋아요</button></div></div>
+  </section>
 </div>
 <section id="login" class="hidden"></section>
 <section id="splash"><div class="spTitle">놀자! 먼작귀</div><canvas id="splashCv"></canvas><div class="spBar"><div id="splashFill"></div></div><div class="spSub">불러오는 중…</div></section>
@@ -64,6 +73,7 @@
 <script src="data.js"></script>
 <script src="auth.js"></script>
 <script src="minigames.js"></script>
+<script src="ar.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

@@ -144,3 +144,20 @@ button, a { touch-action: manipulation; }
 .card.soon { opacity: .75; }
 .card.soon .sub { color: #b9a9b0; }
 .card .sub .only { display: inline-block; background: #ffe3ea; color: #e0708f; border-radius: 8px; padding: 0 5px; font-size: 11px; }
+
+/* v1.9 보물찾기 AR */
+#ar { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 12; background: #000; touch-action: none; overflow: hidden; }
+#ar.noCam { background: linear-gradient(#cfe9ff, #fff4e8 62%, #e7f5d8); }
+#arVid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+#ar.noCam #arVid { display: none; }
+#arCv { position: absolute; top: 0; left: 0; width: 100%; height: 100%; touch-action: none; }
+#arHud { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; right: 60px; display: flex; justify-content: space-between; gap: 8px; z-index: 2; pointer-events: none; font-size: 14px; }
+#arHud span:not(:empty) { background: rgba(255,255,255,.85); color: #4a3f4d; border-radius: 12px; padding: 4px 10px; }
+#arQuit { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: 10px; z-index: 4; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.85); font-size: 18px; font-family: sans-serif; }
+#arBubble { position: absolute; left: 14px; right: 14px; bottom: calc(36% + env(safe-area-inset-bottom)); margin: 0 auto; max-width: 340px; background: #fff; color: #4a3f4d; border-radius: 18px; padding: 10px 14px; font-size: 17px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,.18); z-index: 2; pointer-events: none; }
+#arStart, #arEnd { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.35); z-index: 3; }
+#arStart .card, #arEnd .card { padding: 22px 26px; max-width: 86%; line-height: 1.5; font-size: 16px; text-align: center; }
+#arStart h2, #arEnd h2 { font-weight: normal; margin: 0 0 8px; }
+#arStart button, #arEnd button { font-size: 18px; padding: 10px 26px; width: auto; border-radius: 14px; margin-top: 6px; }
+#arWho { width: 72px; height: 72px; border-radius: 50%; display: block; margin: 0 auto; }
+#arStart.hidden, #arEnd.hidden, #arBubble.hidden, #ar.hidden { display: none; }

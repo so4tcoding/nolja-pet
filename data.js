@@ -44,6 +44,9 @@ window.HP_DATA = {
     { id: 'furuhonya', name: '후루혼야', avatar: 'chars/furuhonya/avatar.png', poses: [
       { id: 'stand', img: 'chars/furuhonya/stand.png', tags: ['walk', 'idle', 'greet', 'tap'], outfit: true, closeEyes: true, headTop: 95, cx: 279, headW: 324, eyes: [[212, 306], [306, 286]], eyeR: 17, neckY: 372, bodyL: 103, bodyR: 456, bottom: 498, footY: 482, color: '#fdeae3', hatTop: 106, earY: 85 },
     ] },
+    { id: 'kani', name: '카니', avatar: 'chars/kani/avatar.png', poses: [   // v1.9 사용자가 보낸 카니 그림 (배경만 지움)
+      { id: 'stand', img: 'chars/kani/stand.png', tags: ['walk', 'idle', 'greet', 'tap'], outfit: true, closeEyes: true, headTop: 95, cx: 302, headW: 343, eyes: [[254, 297], [348, 280]], eyeR: 18, neckY: 369, bodyL: 132, bodyR: 392, bottom: 499, footY: 0, color: '#ffece6', hatTop: 103, earY: 70 },
+    ] },
   ],
 
   pet: {
@@ -109,6 +112,13 @@ window.HP_DATA = {
     { char: 'hachiware', clothes: 'cl_hanbok', img: 'chars/hachiware/wear_cl_hanbok.png', headTop: 6, hatTop: 44, earY: 31, cx: 240, headW: 377, eyes: [[189,  198],  [290,  198]], eyeR: 20, neckY: 293, bodyL: 74, bodyR: 424, bottom: 503, footY: 0 },
     { char: 'chiikawa', clothes: 'cl_kimono', img: 'chars/chiikawa/wear_cl_kimono.png', headTop: 66, hatTop: 81, earY: 78, cx: 245, headW: 353, eyes: [[197,  217],  [293,  217]], eyeR: 18, neckY: 301, bodyL: 109, bodyR: 408, bottom: 503, footY: 0 },
     { char: 'usagi', clothes: 'cl_sundress', img: 'chars/usagi/wear_cl_sundress.png', headTop: 6, hatTop: 104, earY: 99, cx: 248, headW: 365, eyes: [[205,  248],  [290,  248]], eyeR: 16, neckY: 337, bodyL: 124, bodyR: 420, bottom: 503, footY: 0 },
+    // v1.9 카니 전용 (사용자 그림 6장 그대로)
+    { char: 'kani', clothes: 'cl_kani_knit', img: 'chars/kani/wear_cl_kani_knit.png', headTop: 98, hatTop: 106, earY: 73, cx: 301, headW: 341, eyes: [[254, 300], [348, 282]], eyeR: 18, neckY: 371, bodyL: 127, bodyR: 398, bottom: 498, footY: 0 },
+    { char: 'kani', clothes: 'cl_kani_pajamas', img: 'chars/kani/wear_cl_kani_pajamas.png', headTop: 86, hatTop: 94, earY: 54, cx: 306, headW: 347, eyes: [[258, 284], [352, 269]], eyeR: 18, neckY: 358, bodyL: 150, bodyR: 404, bottom: 498, footY: 0 },
+    { char: 'kani', clothes: 'cl_kani_raincoat', img: 'chars/kani/wear_cl_kani_raincoat.png', headTop: 97, hatTop: 105, earY: 71, cx: 301, headW: 340, eyes: [[254, 295], [348, 279]], eyeR: 19, neckY: 367, bodyL: 140, bodyR: 406, bottom: 498, footY: 0 },
+    { char: 'kani', clothes: 'cl_kani_beret', img: 'chars/kani/wear_cl_kani_beret.png', headTop: 94, hatTop: 102, earY: 68, cx: 302, headW: 340, eyes: [[255, 295], [349, 277]], eyeR: 18, neckY: 366, bodyL: 145, bodyR: 394, bottom: 498, footY: 0 },
+    { char: 'kani', clothes: 'cl_kani_cape', img: 'chars/kani/wear_cl_kani_cape.png', headTop: 94, hatTop: 102, earY: 64, cx: 301, headW: 341, eyes: [[254, 290], [348, 273]], eyeR: 18, neckY: 362, bodyL: 110, bodyR: 422, bottom: 498, footY: 0 },
+    { char: 'kani', clothes: 'cl_kani_scarf', img: 'chars/kani/wear_cl_kani_scarf.png', headTop: 125, hatTop: 133, earY: 78, cx: 291, headW: 351, eyes: [[244, 300], [338, 284]], eyeR: 18, neckY: 373, bodyL: 101, bodyR: 421, bottom: 498, footY: 0 },
   ],
   // 옷 맞춤 보정표: 캐릭터별(all) · 포즈별. body=옷, hood=코스튬, hat=모자
   //   w/h: 폭·높이 배율, dx/dy: 위치(512 그림 기준 픽셀), s: 코스튬 크기, len: 코스튬 길이, top: 모자 얹는 머리 꼭대기 y
@@ -170,6 +180,17 @@ window.HP_DATA = {
     { id: 'cl_baseball', name: '야구복', desc: '파란 야구 유니폼', category: 'clothes', price: 110, img: 'items/o_baseball.png', type: 'body', w: 164, h: 172, soon: true },
     { id: 'cl_taekwondo', name: '태권도복', desc: '검은 띠 도복', category: 'clothes', price: 110, img: 'items/o_taekwondo.png', type: 'body', w: 160, h: 192, soon: true },
     { id: 'cl_soccer', name: '축구복', desc: '등번호 10번', category: 'clothes', price: 100, img: 'items/o_soccer.png', type: 'body', w: 163, h: 190, soon: true },
+    // v1.9 카니 전용 옷 (사용자 그림 그대로)
+    { id: 'cl_kani_knit', name: '초록 꽈배기 니트', desc: '포근한 겨울 니트', category: 'clothes', price: 100, img: 'chars/kani/wear_cl_kani_knit.png', type: 'body', only: 'kani', wear: true },
+    { id: 'cl_kani_pajamas', name: '하늘 줄무늬 잠옷', desc: '고깔 잠옷 모자까지', category: 'clothes', price: 90, img: 'chars/kani/wear_cl_kani_pajamas.png', type: 'body', only: 'kani', wear: true },
+    { id: 'cl_kani_raincoat', name: '노란 우비', desc: '비 오는 날 산책용', category: 'clothes', price: 110, img: 'chars/kani/wear_cl_kani_raincoat.png', type: 'body', only: 'kani', wear: true },
+    { id: 'cl_kani_beret', name: '베레모 + 리본 칼라', desc: '분홍 베레모에 리본', category: 'clothes', price: 120, img: 'chars/kani/wear_cl_kani_beret.png', type: 'body', only: 'kani', wear: true },
+    { id: 'cl_kani_cape', name: '민트 케이프', desc: '살랑살랑 민트 망토', category: 'clothes', price: 120, img: 'chars/kani/wear_cl_kani_cape.png', type: 'body', only: 'kani', wear: true },
+    { id: 'cl_kani_scarf', name: '크림 목도리 세트', desc: '털모자 + 목도리 + 장갑', category: 'clothes', price: 130, img: 'chars/kani/wear_cl_kani_scarf.png', type: 'body', only: 'kani', wear: true },
+    { id: 'cl_kani_soon1', name: '카니 새 옷 1', desc: '업데이트 예정', category: 'clothes', price: 100, img: '', type: 'body', only: 'kani', soon: true },
+    { id: 'cl_kani_soon2', name: '카니 새 옷 2', desc: '업데이트 예정', category: 'clothes', price: 100, img: '', type: 'body', only: 'kani', soon: true },
+    { id: 'cl_kani_soon3', name: '카니 새 옷 3', desc: '업데이트 예정', category: 'clothes', price: 100, img: '', type: 'body', only: 'kani', soon: true },
+    { id: 'cl_kani_soon4', name: '카니 새 옷 4', desc: '업데이트 예정', category: 'clothes', price: 100, img: '', type: 'body', only: 'kani', soon: true },
     { id: 'co_raincoat', name: '노란 모자 우비', desc: '비 오는 날에도 신나게', category: 'clothes', group: 'costume', price: 110, img: 'chars/hachiware/wear_co_raincoat.png', type: 'hood', w: 180, h: 246, hole: [88, 78, 55, 36], hw: 176, hs: 1, htop: 0, only: 'hachiware', wear: true },
     { id: 'co_cathood', name: '고양이 후드', desc: '귀 달린 고양이 후드', category: 'clothes', group: 'costume', price: 130, img: 'chars/hachiware/wear_co_cathood.png', type: 'hood', w: 222, h: 250, hole: [114, 80, 66, 40], hw: 190, hs: 1, htop: 26, only: 'hachiware', wear: true },
     { id: 'co_bearhood', name: '곰돌이 털옷', desc: '포근포근 곰돌이', category: 'clothes', group: 'costume', price: 140, img: 'chars/chiikawa/wear_co_bearhood.png', type: 'hood', w: 232, h: 254, hole: [118, 92, 58, 37], hw: 200, hs: 1, htop: 24, only: 'chiikawa', wear: true },
@@ -309,6 +330,11 @@ window.HP_DATA = {
       greet: ['어서 오세요오!', '안녕하세요옷!'], tap: ['네엣!', '열심히 할게요!', '헤헤!'], pet: ['감사합니다앗!', '헤헤~'],
       happy: ['신나요옷!', '최고예요!'], hungry: ['라멘 먹고 싶어요오…'], idle: ['오늘도 열심히!', '라멘 먹으러 와요!', '네엣!'],
       eat: ['맛있어요옷!', '감사합니다앗!'], full: ['배불러요오~'], win: ['해냈어요옷!'], lose: ['다음엔 더 열심히 할게요…!'], shy: ['처, 처음 뵙겠습니다앗!'],
+    },
+    kani: {
+      greet: ['집게 집게~ 안녕!', '왔구나~ 집게 흔들흔들!'], tap: ['집게! 집게!', '옆으로 총총~', '헤헤, 분홍 집게 멋지지?'], pet: ['간지러워~ 집게 집게!', '헤헤~'],
+      happy: ['집게가 춤춰요~!', '신난다 집게!'], hungry: ['배고파서 집게가 축 처졌어…'], idle: ['옆으로 걷는 게 더 편해~', '시사랑 놀고 싶다~', '집게 손질 중…'],
+      eat: ['냠냠 집게로 쏙!', '맛있다 집게~'], full: ['배불러서 옆으로 굴러가겠어~'], win: ['집게 브이! 해냈다!'], lose: ['다음엔 집게 꽉 잡을게…!'], shy: ['…집게로 얼굴 가리기'],
     },
     furuhonya: {
       greet: ['어서 오세요~', '천천히 보고 가세요.'], tap: ['네~?', '좋은 책이 있어요.', '후후.'], pet: ['후후, 고마워요.'],
