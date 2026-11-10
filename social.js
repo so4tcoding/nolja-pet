@@ -51,10 +51,10 @@
     if(HPCloud.configured && !connected)html+='<input id="connectPin" type="password" inputmode="numeric" maxlength="4" placeholder="지금 프로필 PIN"><button id="connectAccount" class="primary">서버 계정 연결</button>';
     html+='</div><div class="ovl"><label>친구 코드로 추가<input id="friendCode" maxlength="8" placeholder="8글자 친구 코드" autocapitalize="characters" autocomplete="off"></label><button id="addFriend" class="primary"'+(connected?'':' disabled')+'>친구 요청</button></div><h3>받은 친구 요청</h3><div id="friendRequests">';
     if(!requests.length)html+='<p class="note">아직 요청이 없어요</p>';
-    requests.forEach(function(r){html+='<div class="friendRow"><span>'+esc(r.nickname)+'</span><button class="acceptFriend" data-from="'+r.id+'">수락</button><button class="declineFriend" data-from="'+r.id+'">거절</button></div>';});
+    requests.forEach(function(r){html+='<div class="friendRow"><span>'+esc(r.nickname)+'</span><button class="acceptFriend" data-from="'+esc(r.id)+'">수락</button><button class="declineFriend" data-from="'+esc(r.id)+'">거절</button></div>';});
     html+='</div><h3>내 친구</h3><div id="friendList">';
     if(!friends.length)html+='<p class="note">친구 코드를 주고받아 보세요</p>';
-    friends.forEach(function(f){html+='<div class="friendRow"><img src="'+avatar(f.pet)+'" alt=""><span>'+esc(f.nickname)+'</span><button class="chatFriend" data-id="'+f.id+'">대화</button></div>';});
+    friends.forEach(function(f){html+='<div class="friendRow"><img src="'+avatar(f.pet)+'" alt=""><span>'+esc(f.nickname)+'</span><button class="chatFriend" data-id="'+esc(f.id)+'">대화</button></div>';});
     html+='</div><button id="chatPreview">채팅 창 미리보기 (전송 안 됨)</button><p class="note">창 윗부분 끌기 · 오른쪽 아래 ◢로 크기 조절 · −로 모서리에 접기<br>채팅은 앱 안에서만 떠요. 다른 앱 위 미니 채팅은 아직 지원하지 않아요.</p>';
     $('socialBody').innerHTML=html;
     if($('friendCode'))$('friendCode').value=draft;if($('connectPin'))$('connectPin').value=pinDraft;
