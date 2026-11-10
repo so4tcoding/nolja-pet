@@ -217,6 +217,7 @@
   var pet = { pose: 'stand', poseT: 0, vari: null, x: 150, y: 150, tx: 150, ty: 150, vx: 0, vy: 0, size: 150, wait: 1, face: 1, happy: 0, eat: 0, eatImg: null, hop: 0, sleeping: false, idle: 0, awake: 0, chat: 6, t: 0, petLine: 0 };
   var fx = [];
   function resize() {
+    if(!S)return;
     var r = stage.getBoundingClientRect(); DPR = Math.min(window.devicePixelRatio || 1, 3);
     W = Math.max(1, r.width); H = Math.max(1, r.height);
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
@@ -299,7 +300,7 @@
   function selectPet(id) {
     if (!petById[id] || S.pet === id) return;
     S.petOutfits = S.petOutfits || {}; S.petOutfits[S.pet] = S.equip.clothes || '';
-    S.pet = id; initProgress(); S.equip.clothes = S.petOutfits[id] || ''; S.equip.hat = ''; save(); wake(); pet.hop = 0.01; pet.happy = 1.5; pet.pose = 'stand'; pet.poseT = 0; pet.vari = null;
+    S.pet = id; S.overlayPets=S.overlayPets||[];if(S.overlayPets.indexOf(id)<0)S.overlayPets.push(id); initProgress(); S.equip.clothes = S.petOutfits[id] || ''; S.equip.hat = ''; save(); wake(); pet.hop = 0.01; pet.happy = 1.5; pet.pose = 'stand'; pet.poseT = 0; pet.vari = null;
     say('안녕! 나는 ' + petName() + '! 잘 부탁해요~', 3, 'greet'); updateHud(); nativeSync(); if (window.HPAuth && HPAuth.current()) HPAuth.setPet(id);
   }
   function spawn(src, x, y, opt) {
@@ -916,7 +917,7 @@
     var cur = window.HPAuth && HPAuth.current();
     if (cur) SAVE_KEY = HPAuth.saveKey(cur.id);
     var existed = load(); started = true;
-    if (!existed && info && info.pet && petById[info.pet]) S.pet = info.pet;
+    if (!existed && info && info.pet && petById[info.pet]) { S.pet = info.pet; S.overlayPets=[S.pet]; }
     initProgress();
     if (cur) { HPAuth.setPet(S.pet); hudProf = ''; }
     if (info && info.migrated) toast('예전 저장 기록을 ' + cur.nick + ' 프로필로 옮겼어요');
