@@ -1,5 +1,5 @@
 // ===== 로그인 (이 폰 안에서만): 닉네임 + 숫자 4자리 비밀번호 =====
-// 프로필마다 저장 데이터가 따로 있어요. 서버가 없어서 다른 폰과는 공유되지 않아요.
+// 프로필마다 로컬 저장. 서버가 준비되면 Spark 무료 계정 복구/동기화도 가능해요.
 (function () {
   'use strict';
   var KEY = 'hp_profiles_v1', LEGACY = 'healingpet_save_v1';
@@ -216,6 +216,13 @@
         }
       }, 150);
     }
+    HPCloud.onAvailability(function(){
+      if(view==='recover' && !box.classList.contains('hidden')){
+        var label=$('recoveryServer'),button=box.querySelector('[data-dorecover]');
+        if(label)label.textContent=HPCloud.configured?'Firebase 계정 복구 (Spark 무료)':'서버 준비 중 · 지금은 백업 코드를 이용해 주세요';
+        if(button)button.disabled=!HPCloud.configured;
+      }
+    });
     render();
   };
 })();

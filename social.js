@@ -44,6 +44,7 @@
     if(window.visualViewport)visualViewport.addEventListener('resize',function(){if(geo){position();tintBubbles();}});
   }
   function render(){
+    var draft=$('friendCode')?$('friendCode').value:'',pinDraft=$('connectPin')?$('connectPin').value:'',focus=document.activeElement&&document.activeElement.id;
     var p=HPAuth.current(), connected=HPCloud.configured && p && p.cloud;
     var html='<div class="ovl"><b>내 친구 코드</b><strong id="myFriendCode">'+esc(connected?p.cloud.code:'--------')+'</strong><p>'+esc(!HPCloud.configured?'서버 준비 중 · 설정 후 친구 코드가 생겨요':connected?'전화번호 없이 코드로 친구를 추가해요. 상대가 수락한 뒤 대화할 수 있어요.':'기존 로컬 프로필을 서버에 연결해 주세요')+'</p>';
     if(connected)html+='<button id="copyFriendCode">내 코드 복사</button>';
@@ -56,6 +57,8 @@
     friends.forEach(function(f){html+='<div class="friendRow"><img src="'+avatar(f.pet)+'" alt=""><span>'+esc(f.nickname)+'</span><button class="chatFriend" data-id="'+f.id+'">대화</button></div>';});
     html+='</div><button id="chatPreview">채팅 창 미리보기 (전송 안 됨)</button><p class="note">창 윗부분 끌기 · 오른쪽 아래 ◢로 크기 조절 · −로 모서리에 접기<br>채팅은 앱 안에서만 떠요. 다른 앱 위 미니 채팅은 아직 지원하지 않아요.</p>';
     $('socialBody').innerHTML=html;
+    if($('friendCode'))$('friendCode').value=draft;if($('connectPin'))$('connectPin').value=pinDraft;
+    if((focus==='friendCode'||focus==='connectPin')&&$(focus))$(focus).focus();
     $('socialMsg').textContent=HPCloud.status();
     if($('copyFriendCode'))$('copyFriendCode').onclick=function(){navigator.clipboard.writeText(p.cloud.code).then(function(){notice('친구 코드를 복사했어요');}).catch(function(){notice(p.cloud.code);});};
     $('addFriend').onclick=function(){var b=this;b.disabled=true;HPCloud.call('addFriend',{accountId:me(),code:$('friendCode').value}).then(function(r){notice(r.already?'이미 친구예요':'친구 요청을 보냈어요. 수락을 기다려 주세요');}).catch(function(e){notice(HPCloud.error(e));}).finally(function(){b.disabled=false;});};
@@ -138,5 +141,6 @@
   function closeChat(){if(win)win.classList.add('hidden');if(stopMessages)stopMessages();stopMessages=null;}
   function back(){if(win && !win.classList.contains('hidden')){closeChat();return true;}if(panel && !panel.classList.contains('hidden')){panel.classList.add('hidden');return true;}return false;}
   HPCloud.onStatus(function(t){if($('socialMsg'))$('socialMsg').textContent=t;});
+  HPCloud.onAvailability(function(){if(panel&&!panel.classList.contains('hidden'))open();});
   window.HPSocial={open:open,openChat:openChat,back:back,close:closeChat,tint:tintBubbles};
 })();
