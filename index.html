@@ -15,6 +15,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="놀자! 먼작귀">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="assets/chat-bg-default.css">
 </head>
 <body>
 <div id="app">
@@ -24,6 +25,7 @@
       <button id="petName">캐릭터</button>
       <div id="levelName" class="chip">처음 만남</div>
       <div class="spacer"></div>
+      <button id="socialBtn" class="chip">친구</button>
       <button id="profBtn" class="chip hidden"></button>
       <div id="coins" class="chip coin"><img src="assets/ui/ui_coin.png" alt=""><span id="coinText">0</span></div>
     </div>
@@ -71,9 +73,14 @@
 <section id="splash"><div class="spTitle">놀자! 먼작귀</div><canvas id="splashCv"></canvas><div class="spBar"><div id="splashFill"></div></div><div class="spSub">불러오는 중…</div></section>
 <script src="pwa.js"></script>
 <script src="data.js"></script>
+<script src="firebase-config.js"></script>
+<script src="cloud.js"></script>
 <script src="auth.js"></script>
+<script src="social.js"></script>
 <script src="minigames.js"></script>
 <script src="ar.js"></script>
+<script src="companions.js"></script>
+<script src="cheer.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

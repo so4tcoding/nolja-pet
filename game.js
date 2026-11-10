@@ -49,6 +49,7 @@
       pet: D.pets[0].id, snacks: {}, equip: { hat: '', clothes: '', acc: '', skin: defaultSkin() },
       missionDate: '', missions: {}, dailyPetAff: 0, lastSave: Date.now(), totalPets: 0, best: 0 };
     S.snacks[D.snacks[0].id] = D.startingCookies;
+    S.petOutfits = {}; S.overlayPets = [S.pet]; S.overlayScale = 1; S.petSizes={}; initProgress();
   }
   function sanitize() {
     var n = { v: 1, coins: 0, affection: 0, hunger: 70, mood: 80, owned: [], snacks: {}, equip: {}, missionDate: '', missions: {}, dailyPetAff: 0, lastSave: Date.now(), totalPets: 0, best: 0 };
@@ -70,7 +71,12 @@
     }
     ['hat', 'clothes'].forEach(function (c) { var it = itemById[S.equip[c]]; if (it && it.soon) S.equip[c] = ''; });
     S.equip.acc = '';
+    S.petOutfits = S.petOutfits || {};
+    S.overlayPets = Array.isArray(S.overlayPets) ? S.overlayPets.filter(function (id, i, a) { return petById[id] && a.indexOf(id) === i; }) : [S.pet];
+    S.overlayScale = clamp(+S.overlayScale || 1, 0.5, 2.5); S.petSizes=S.petSizes||{};
+    S.petOutfits[S.pet] = S.equip.clothes || '';
     if (!petById[S.pet]) S.pet = D.pets[0].id;
+    initProgress();
     S.hunger = clamp(+S.hunger || 0, 0, 100); S.mood = clamp(+S.mood || 0, 0, 100); S.coins = Math.max(0, S.coins | 0);
   }
   function load() {
@@ -81,6 +87,7 @@
   function save() {
     if (!S || !started) return;
     S.lastSave = Date.now();
+    S.petOutfits = S.petOutfits || {}; S.petOutfits[S.pet] = S.equip.clothes || '';
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { console.warn('저장 실패', e); }
   }
 
@@ -112,14 +119,20 @@
 
   // ───────── 호감도 ─────────
   function levelOf(aff) { var t = P.levelThresholds, lv = 1; for (var i = 0; i < t.length; i++) if (aff >= t[i]) lv = i + 1; return lv; }
-  function level() { return levelOf(S.affection); }
+  function initProgress() {
+    if (!S.affectionByPet) { S.affectionByPet = {}; D.pets.forEach(function(p){ S.affectionByPet[p.id] = Math.max(0,+S.affection || 0); }); }
+    D.pets.forEach(function(p){ if(!Number.isFinite(S.affectionByPet[p.id])) S.affectionByPet[p.id]=0; S.affectionByPet[p.id]=Math.max(0,S.affectionByPet[p.id]); });
+    if (!S.dailyPetAffByPet) { S.dailyPetAffByPet = {}; D.pets.forEach(function(p){ S.dailyPetAffByPet[p.id]=Math.max(0,+S.dailyPetAff||0); }); }
+    S.affection=S.affectionByPet[S.pet] || 0; S.dailyPetAff=S.dailyPetAffByPet[S.pet] || 0;
+  }
+  function level() { return levelOf(S.affectionByPet ? S.affectionByPet[S.pet] || 0 : S.affection); }
   function levelProgress() {
     var lv = level(), t = P.levelThresholds; if (lv >= t.length) return 1;
     return (S.affection - t[lv - 1]) / (t[lv] - t[lv - 1]);
   }
   function addAffection(n) {
     if (n <= 0) return;
-    var before = level(); S.affection += n; var after = level();
+    var before = level(); S.affectionByPet[S.pet]=(S.affectionByPet[S.pet] || 0)+n; S.affection=S.affectionByPet[S.pet]; var after = level();
     if (after > before) {
       var reward = 0; for (var lv = before + 1; lv <= after; lv++) reward += P.levelUpRewardPerLevel * lv;
       S.coins += reward;
@@ -134,7 +147,7 @@
   function prog(m) { if (!S.missions[m.id]) S.missions[m.id] = { p: 0, c: false }; return S.missions[m.id]; }
   function checkDaily() {
     if (S.missionDate === today()) return;
-    S.missionDate = today(); S.missions = {}; S.dailyPetAff = 0;
+    S.missionDate = today(); S.missions = {}; S.dailyPetAff = 0; S.dailyPetAffByPet = {};
     report('login', 1); save(); refreshOpenSheet();
   }
   function report(type, amount) {
@@ -208,9 +221,12 @@
     W = Math.max(1, r.width); H = Math.max(1, r.height);
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    pet.size = clamp(Math.min(W, H) * P.sizeRatio, 110, 420);
+    pet.size = homeSizeFor(S.pet);
     var b = bounds(); pet.x = clamp(pet.x, b.x0, b.x1); pet.y = clamp(pet.y, b.y0, b.y1); pet.tx = pet.x; pet.ty = pet.y;
   }
+  function homeIds() { var a=(S.overlayPets || [S.pet]).filter(function(id){return !!petById[id];});return a.length?a:[S.pet]; }
+  function homeSizeFor(id) { var count=homeIds().length,base=clamp(Math.min(W,H)*P.sizeRatio,110,420)/Math.sqrt(Math.min(count,4));return clamp(base*((S.petSizes||{})[id]||S.overlayScale||1),55,Math.min(W*.95,H*.8)); }
+  function homeHasMain(){return homeIds().indexOf(S.pet)>=0;}
   function visibleH() { // 아래 창이 열려 있으면 그 위쪽만 사용
     var sh = $('sheet'); if (sh.classList.contains('hidden')) return H;
     var top = sh.getBoundingClientRect().top - stage.getBoundingClientRect().top; return clamp(top, pet.size * 0.9, H);
@@ -273,7 +289,8 @@
   function iga(w) { var c = w.charCodeAt(w.length - 1); return w + ((c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28) ? '이' : '가'); }
   function curPet() { return petById[S.pet] || D.pets[0]; }
   function petName() { return curPet().name; }
-  function hitPet(x, y) { // 캐릭터 몸 범위(타원) 안을 눌렀는지
+  function hitPet(x, y) {
+    if(!homeHasMain())return false; // 캐릭터 몸 범위(타원) 안을 눌렀는지
     var s = pet.size, pd = curPose(), u = s / 512;
     var cx = pet.x + (((pd.bodyL + pd.bodyR) / 2) - 256) * u * pet.face, cy = pet.y + (((pd.headTop + pd.bottom) / 2) - 256) * u;
     var dx = (x - cx) / ((pd.bodyR - pd.bodyL) / 2 * u + 10), dy = (y - cy) / ((pd.bottom - pd.headTop) / 2 * u + 10);
@@ -281,7 +298,8 @@
   }
   function selectPet(id) {
     if (!petById[id] || S.pet === id) return;
-    S.pet = id; save(); wake(); pet.hop = 0.01; pet.happy = 1.5; pet.pose = 'stand'; pet.poseT = 0; pet.vari = null;
+    S.petOutfits = S.petOutfits || {}; S.petOutfits[S.pet] = S.equip.clothes || '';
+    S.pet = id; initProgress(); S.equip.clothes = S.petOutfits[id] || ''; S.equip.hat = ''; save(); wake(); pet.hop = 0.01; pet.happy = 1.5; pet.pose = 'stand'; pet.poseT = 0; pet.vari = null;
     say('안녕! 나는 ' + petName() + '! 잘 부탁해요~', 3, 'greet'); updateHud(); nativeSync(); if (window.HPAuth && HPAuth.current()) HPAuth.setPet(id);
   }
   function spawn(src, x, y, opt) {
@@ -298,8 +316,8 @@
   function doPet(x, y) {
     wake(); pet.happy = 1.2; pet.vx = pet.vy = 0; pet.wait = Math.max(pet.wait, 1.5);
     S.totalPets++; S.mood = Math.min(100, S.mood + 4);
-    if (S.dailyPetAff < P.dailyPetAffectionCap) { S.dailyPetAff++; addAffection(1); }
-    else if (S.dailyPetAff === P.dailyPetAffectionCap) { S.dailyPetAff++; toast('오늘 쓰다듬기 호감도는 다 받았어요 (내일 또!)'); }
+    if (S.dailyPetAff < P.dailyPetAffectionCap) { S.dailyPetAff++; S.dailyPetAffByPet[S.pet]=S.dailyPetAff; addAffection(1); }
+    else if (S.dailyPetAff === P.dailyPetAffectionCap) { S.dailyPetAff++; S.dailyPetAffByPet[S.pet]=S.dailyPetAff; toast('오늘 쓰다듬기 호감도는 다 받았어요 (내일 또!)'); }
     report('pet', 1);
     spawn(D.art.heart, x, y, { vy: -110 });
     if (pet.t - pet.petLine > 1.6) { pet.petLine = pet.t; talk('pet', 2.4); }
@@ -311,10 +329,11 @@
   function onDown(e) {
     var p = pos(e);
     try { cv.setPointerCapture(e.pointerId); } catch (_) {}
-    touches[e.pointerId] = { sx: p.x, sy: p.y, lx: p.x, ly: p.y, rub: 0, moved: false, t: performance.now(), onPet: hitPet(p.x, p.y) };
+    touches[e.pointerId] = { compId: COMP && COMP.hit(p.x,p.y), sx: p.x, sy: p.y, lx: p.x, ly: p.y, rub: 0, moved: false, t: performance.now(), onPet: hitPet(p.x, p.y) };
   }
   function onMove(e) {
     var t = touches[e.pointerId]; if (!t) return;
+    if(t.compId)return;
     var p = pos(e), d = Math.hypot(p.x - t.lx, p.y - t.ly);
     if (Math.hypot(p.x - t.sx, p.y - t.sy) > 12) t.moved = true;
     if (hitPet(p.x, p.y)) {
@@ -326,6 +345,7 @@
   function up(e) {
     var t = touches[e.pointerId]; if (!t) return; delete touches[e.pointerId];
     if (t.moved || performance.now() - t.t > 600) return;
+    if(t.compId){COMP.tap(t.compId);return;}
     if (t.onPet) doTap();
     else if (!pet.sleeping && pet.eat <= 0) { // 빈 곳을 누르면 그쪽으로 걸어가요
       var b = bounds(); pet.tx = clamp(t.sx, b.x0, b.x1); pet.ty = clamp(t.sy + pet.size * 0.3, b.y0, b.y1); pet.wait = 0; wake();
@@ -347,6 +367,8 @@
   }
 
   function update(dt) {
+    pet.size=homeSizeFor(S.pet);
+    if(COMP)COMP.update(dt);
     pet.t += dt;
     var b = bounds();
     ['happy', 'eat', 'awake'].forEach(function (k) { if (pet[k] > 0) pet[k] -= dt; });
@@ -482,6 +504,8 @@
   }
   function draw() {
     ctx.clearRect(0, 0, W, H);
+    $('bubble').style.visibility=homeHasMain()?'':'hidden';
+    if(!homeHasMain()){if(COMP)COMP.draw(ctx);return;}
     var s = pet.size, t = pet.t, pd = curPose(), u = s / 512, md = mood(), v = pet.vari;
     var hp = pet.hop > 0 ? pet.hop / 0.45 : 0;
     var hopY = hp ? -Math.sin(hp * Math.PI) * s * 0.18 : 0;
@@ -516,6 +540,7 @@
     });
     ctx.globalAlpha = 1;
     hopY += bob; var bub = $('bubble'); bub.style.left = clamp(pet.x, 80, W - 80) + 'px'; bub.style.top = Math.max(40, pet.y + (pd.headTop / 512 - 0.5) * s - 14 + hopY) + 'px';
+    if(COMP)COMP.draw(ctx);
   }
 
   // ───────── 화면 (HUD, 창) ─────────
@@ -610,13 +635,22 @@
     } else if (k === 'wardrobe') {
       tabs(['pet', 'clothes', 'costume', 'skin']);
       if (sheet.tab === 'pet') {
-        if (NATIVE) body.appendChild(overlayBox()); // 화면 친구는 안드로이드 앱 전용: 웹/아이폰에선 메뉴를 숨겨요
+        body.appendChild(overlayBox()); // 화면 친구는 안드로이드 앱 전용: 웹/아이폰에선 메뉴를 숨겨요
         var gp = el('div', 'grid'); body.appendChild(gp);
         D.pets.forEach(function (p) {
           var on = S.pet === p.id;
-          var c = el('div', 'card' + (on ? ' on' : ''), '<img class="thumb av" src="' + ASSET + p.avatar + '" alt=""><div class="nm">' + esc(p.name) + '</div><div class="sub">포즈 ' + p.poses.length + '개</div>');
+          var c = el('div', 'card' + (on ? ' on' : ''), '<img class="thumb av" src="' + ASSET + p.avatar + '" alt=""><div class="nm">' + esc(p.name) + '</div><div class="sub">Lv.' + levelOf((S.affectionByPet || {})[p.id] || 0) + ' · 호감 ' + ((S.affectionByPet || {})[p.id] || 0) + '</div>');
           var b = el('button', on ? '' : 'primary', on ? '함께하는 중' : '함께하기'); b.disabled = on;
-          b.onclick = function () { selectPet(p.id); renderSheet(); }; c.appendChild(b); gp.appendChild(c);
+          b.onclick = function () { selectPet(p.id); renderSheet(); }; c.appendChild(b);
+          {
+            var ck = el('label', 'ovPick'); var input = document.createElement('input'); input.type = 'checkbox'; input.dataset.overlayPet = p.id;
+            input.checked = (S.overlayPets || [S.pet]).indexOf(p.id) >= 0;
+            input.onchange = function () { S.overlayPets = S.overlayPets || [S.pet]; if (input.checked) { if (S.overlayPets.indexOf(p.id) < 0) S.overlayPets.push(p.id); } else S.overlayPets = S.overlayPets.filter(function (id) { return id !== p.id; }); save(); nativeSync(); renderSheet(); };
+            ck.appendChild(input); ck.appendChild(document.createTextNode('홈에 소환')); c.appendChild(ck);
+            var sizeLabel=el('label','petSize','크기 <output>'+Math.round(((S.petSizes||{})[p.id]||S.overlayScale||1)*100)+'%</output>');var sizeInput=document.createElement('input');sizeInput.type='range';sizeInput.min=50;sizeInput.max=250;sizeInput.value=Math.round(((S.petSizes||{})[p.id]||S.overlayScale||1)*100);sizeInput.dataset.petSize=p.id;sizeInput.setAttribute('aria-label',p.name+' 크기');
+            sizeInput.oninput=function(){S.petSizes=S.petSizes||{};S.petSizes[p.id]=+sizeInput.value/100;sizeLabel.querySelector('output').textContent=sizeInput.value+'%';save();nativeSync();};sizeLabel.appendChild(sizeInput);c.appendChild(sizeLabel);
+          }
+          gp.appendChild(c);
         });
         return;
       }
@@ -649,17 +683,24 @@
       tabs(null);
       var cu = HPAuth.current();
       if (!cu) { body.appendChild(el('div', 'empty', '로그인하지 않았어요')); return; }
-      var pc = el('div', 'ovl', '<b>' + esc(cu.nick) + '</b><br>프로필 사진: ' + esc(petName()) + ' (함께하는 캐릭터)<br><span class="note">이 폰 안에만 저장돼요. 다른 폰과는 공유되지 않아요.</span>');
+      var pc = el('div', 'ovl', '<b>' + esc(cu.nick) + '</b><br>프로필 사진: ' + esc(petName()) + ' (함께하는 캐릭터)<br><span class="note">기록은 이 폰에 저장돼요. 서버 연결 시 계정 복구와 친구 채팅을 쓸 수 있어요.</span>');
       body.appendChild(pc);
+      body.appendChild(CHEER.settings());
       var bs = el('div', 'btns'), lo = el('button', 'primary', '로그아웃 / 친구 바꾸기'); lo.onclick = logout; bs.appendChild(lo); pc.appendChild(bs);
       var pw = el('div', 'ovl', '<b>비밀번호 바꾸기</b><div class="pinRow"><input id="pinOld" inputmode="numeric" maxlength="4" placeholder="지금 비밀번호" type="password"><input id="pinNew" inputmode="numeric" maxlength="4" placeholder="새 비밀번호 4자리" type="password"></div>');
-      var cb = el('button', '', '바꾸기'); cb.onclick = function () { var r = HPAuth.changePin($('pinOld').value, $('pinNew').value); toast(r.ok ? '비밀번호를 바꿨어요' : r.msg); if (r.ok) renderSheet(); };
+      var cb = el('button', '', '바꾸기'); cb.onclick = function () {
+        var oldP=$('pinOld').value,newP=$('pinNew').value;
+        if(!/^\d{4}$/.test(newP)){toast('새 비밀번호는 숫자 4자리예요');return;}
+        var chk=HPAuth.login(cu.id,oldP); if(!chk.ok){toast(chk.msg);return;}
+        var done=function(){var r=HPAuth.changePin(oldP,newP);oldP=newP='';toast(r.ok?'비밀번호를 바꿨어요':r.msg);if(r.ok)renderSheet();};
+        if(cu.cloud){cb.disabled=true;HPCloud.changePin(oldP,newP).then(done).catch(function(e){oldP=newP='';toast(HPCloud.error(e));cb.disabled=false;});} else done();
+      };
       var b2 = el('div', 'btns'); b2.appendChild(cb); pw.appendChild(b2); body.appendChild(pw);
-      var dl = el('div', 'ovl', '<b>프로필 지우기</b><br><span class="note">저장 기록(코인, 옷, 호감도)이 모두 사라져요.</span><div class="pinRow"><input id="pinDel" inputmode="numeric" maxlength="4" placeholder="비밀번호" type="password"></div>');
+      var dl = el('div', 'ovl', '<b>프로필 지우기</b><br><span class="note">이 폰의 프로필과 저장 기록을 지워요. 서버 계정은 지우지 않으며, 계정 복구로 돌아올 수 있어요.</span><div class="pinRow"><input id="pinDel" inputmode="numeric" maxlength="4" placeholder="비밀번호" type="password"></div>');
       var db = el('button', '', '이 프로필 지우기'); db.onclick = function () {
         if (!confirm(cu.nick + ' 프로필을 정말 지울까요?')) return;
         var r = HPAuth.remove(cu.id, $('pinDel').value); if (!r.ok) { toast(r.msg); return; }
-        S = null; nCall('setOverlay', false, overlayCfg()); location.reload();
+        nCall('configureCheer',JSON.stringify({enabled:false})); S = null; nCall('setOverlay', false, overlayCfg()); location.reload();
       };
       var b3 = el('div', 'btns'); b3.appendChild(db); dl.appendChild(b3); body.appendChild(dl);
       // 백업 코드: 아이폰은 오래 안 열면 기록이 지워질 수 있어서, 코드로 복사해 두고 다시 불러올 수 있어요
@@ -694,38 +735,47 @@
   });
   $('sheetClose').onclick = closeSheet;
   $('petName').onclick = function () { openSheet('wardrobe', 'pet'); };
+  $('socialBtn').onclick = function () { save(); HPSocial.open(); };
   $('profBtn').onclick = function () { if (sheet.kind === 'profile') closeSheet(); else openSheet('profile'); };
 
   // ───────── 화면 친구 (안드로이드: 앱을 꺼도 화면 위를 돌아다니기) ─────────
   var NATIVE = window.HPNative || null;
   function nCall(fn, a, b) { try { return NATIVE && NATIVE[fn] ? NATIVE[fn](a, b) : null; } catch (e) { console.warn(e); return null; } }
-  function overlayCfg() {
-    // 화면 친구: 옷을 입었으면 옷 입은 서 있는 그림 한 장(걸을 땐 통통), 멈추면 같은 옷의 앉은 그림(있을 때만)
-    var c = curPet(), w = wearFor(), list = c.poses.map(function (q) {
+  function overlayCfgFor(id) {
+    var c = petById[id] || curPet(), cl = id === S.pet ? S.equip.clothes : (S.petOutfits || {})[id];
+    var w = wearBy[id + '|' + cl], it = itemById[cl]; if (!it || S.owned.indexOf(cl) < 0 || it.only !== id) w = null;
+    var list = c.poses.map(function (q) {
       var p = w || q;
       return { id: q.id, img: 'www/assets/' + p.img, tags: q.tags, footY: p.footY || 0, cx: p.cx, bottom: p.bottom, headTop: p.headTop };
     });
-    var dp = w ? dressFor(w) : null;
-    if (dp && dp !== w) list.push({ id: 'dress', img: 'www/assets/' + dp.img, tags: [], footY: 0, cx: dp.cx, bottom: dp.bottom, headTop: dp.headTop });
-    return JSON.stringify({ id: c.id, name: c.name, poses: list, lines: ovLines(c.id) });
+    var dp = w ? dressBy[id + '|' + cl] : null;
+    if (dp) list.push({ id: 'dress', img: 'www/assets/' + dp.img, tags: [], footY: 0, cx: dp.cx, bottom: dp.bottom, headTop: dp.headTop });
+    return { id: c.id, name: c.name, poses: list, lines: ovLines(c.id), scale: (S.petSizes || {})[id] || S.overlayScale || 1 };
+  }
+  function overlayCfg() {
+    if (!S) return '{}';
+    var o = overlayCfgFor(S.pet);
+    o.pets = (S.overlayPets || [S.pet]).filter(function (id) { return !!petById[id]; }).map(overlayCfgFor);
+    return JSON.stringify(o);
   }
   function ovLines(id) {
     var pl = (D.petLines && D.petLines[id]) || {}, o = {};
-    ['pet', 'tap', 'happy', 'sleep', 'hungry', 'idle', 'greet'].forEach(function (k) { o[k] = pl[k] || D.lines[k]; });
+    ['pet', 'tap', 'happy', 'sleep', 'hungry', 'idle', 'greet', 'cheer'].forEach(function (k) { o[k] = pl[k] || D.lines[k] || D.lines.happy; });
     o.overlay = pl.idle ? pl.idle.concat(pl.tap || []) : D.lines.overlay;
     return o;
   }
-  function nativeSync() { if (NATIVE) nCall('updatePet', overlayCfg()); }
+  function nativeSync() { if (NATIVE) nCall('updatePet', overlayCfg()); if (CHEER) CHEER.syncNative(); }
   function overlayBox() {
     var d = el('div', 'ovl');
-    if (!NATIVE) { d.innerHTML = '<b>화면 친구</b><br>앱을 꺼도 ' + esc(iga(petName())) + ' 핸드폰 화면 위를 돌아다녀요.<br><span class="note">안드로이드 앱에서만 쓸 수 있어요.</span>'; return d; }
+    if (!NATIVE) { d.innerHTML = '<b>함께 걷는 친구들</b><br>아래에서 여러 친구를 골라요. 각자 걸어 다니고 톡 누르면 말해요.<br><span class="note">아이폰/웹은 앱 안에서만 걸어요. Android는 다른 앱 위에도 띄울 수 있어요. 선택이 없으면 현재 친구 한 명만 보여요.</span>'; overlaySizeControls(d); return d; }
     var on = !!nCall('isOverlayOn'), perm = !!nCall('hasOverlayPermission');
-    d.innerHTML = '<b>화면 친구 ' + (on ? '켜짐 ✓' : '꺼짐') + '</b><br>앱을 꺼도 ' + esc(iga(petName())) + ' 화면 위를 걸어 다녀요. 톡 누르면 말하고, 두 번 톡 누르면 앱이 열려요.' +
+    d.innerHTML = '<b>화면 친구 ' + (on ? '켜짐 ✓' : '꺼짐') + '</b><br>아래에서 여러 친구를 소환할 수 있어요 (' + (S.overlayPets || [S.pet]).length + '명). 친구별로 마지막에 입힌 옷을 기억해요. 톡: 말하기 · 두 번 톡: 앱 열기 · 끌기: 이동.' +
       (perm ? '' : '<br><span class="note">처음에는 "다른 앱 위에 표시" 허용이 필요해요.</span>');
     var bs = el('div', 'btns'), t = el('button', on ? '' : 'primary', on ? '화면 친구 끄기' : '화면 친구 켜기');
     t.onclick = function () {
       if (on) { nCall('setOverlay', false, overlayCfg()); toast('화면 친구를 껐어요'); }
       else {
+        if (!(S.overlayPets || []).length) { toast('아래에서 소환할 친구를 골라 주세요'); return; }
         var r = nCall('setOverlay', true, overlayCfg());
         if (r === 'need_permission') toast('"다른 앱 위에 표시"를 허용하고 돌아오면 켜져요');
         else toast('켜졌어요! 앱을 나가면 ' + iga(petName()) + ' 화면에 나타나요');
@@ -734,7 +784,15 @@
     };
     bs.appendChild(t);
     if (!perm) { var p = el('button', '', '권한 설정 열기'); p.onclick = function () { nCall('openOverlaySettings'); }; bs.appendChild(p); }
-    d.appendChild(bs); return d;
+    d.appendChild(bs);
+    overlaySizeControls(d); return d;
+  }
+  function overlaySizeControls(d) {
+    var sz = el('label', 'ovSize', '전체 크기 <output id="ovSizeValue">' + Math.round((S.overlayScale || 1) * 100) + '%</output>');
+    var sl = document.createElement('input'); sl.type = 'range'; sl.id = 'ovSize'; sl.min = '50'; sl.max = '250'; sl.step = '1'; sl.value = Math.round((S.overlayScale || 1) * 100); sl.setAttribute('aria-label', '화면 친구 크기');
+    sl.onchange=refreshOpenSheet;
+    sl.oninput = function () { S.overlayScale = +sl.value / 100; S.petSizes={}; $('ovSizeValue').textContent = sl.value + '%'; save(); nativeSync(); };
+    sz.appendChild(sl); d.appendChild(sz); return d;
   }
 
   // ───────── 놀이 (minigames.js) ─────────
@@ -778,6 +836,7 @@
   });
   window.HP_ARX = AR;
   window.hpBack = function () {
+    if (window.HPSocial && HPSocial.back()) return true;
     if (AR.running()) { AR.close(); return true; }
     if (MINI.running()) { if (MINI.over()) closeMini(); else MINI.stop(); return true; }
     if (sheet.kind) { closeSheet(); return true; }
@@ -785,6 +844,9 @@
   };
   window.hpPause = function () { save(); };
 
+  var COMP = window.HP_COMPANIONS({state:function(){return S;},ids:homeIds,width:function(){return W;},height:visibleH,size:homeSizeFor,config:overlayCfgFor,drawChar:drawChar,stage:stage});
+  var CHEER = window.HP_CHEER({ state:function(){return S;}, pet:curPet, line:line, say:function(text,dur,kind){if(homeHasMain())say(text,dur,kind);else toast(petName()+': '+text);}, save:save, native:NATIVE, nCall:nCall });
+  window.hpCheerNative = function (text) { if(started){if(homeHasMain())say(text,6,'happy');else toast(petName()+': '+text);} };
   // ───────── 시작 / 반복 ─────────
   var last = 0, acc = { save: 0, daily: 0, hud: 0 };
   function loop(now) {
@@ -796,7 +858,7 @@
     if (acc.hud >= 0.25) { acc.hud = 0; updateHud(); }
     requestAnimationFrame(loop);
   }
-  document.addEventListener('visibilitychange', function () { if (!started) return; if (document.hidden) save(); else { timeStep(); checkDaily(); updateHud(); refreshOpenSheet(); } });
+  document.addEventListener('visibilitychange', function () { if (!started) return; if (document.hidden) save(); else { timeStep(); checkDaily(); updateHud(); refreshOpenSheet(); if(CHEER) CHEER.opened(); } });
   window.hpResume = function () { refreshOpenSheet(); };
   window.addEventListener('pagehide', save);
   window.addEventListener('resize', resize);
@@ -810,6 +872,7 @@
     skipHours: function (h) { offline(h); save(); updateHud(); },
     nextDay: function () { S.missionDate = ''; checkDaily(); },
     reset: function () { localStorage.removeItem(SAVE_KEY); newGame(); checkDaily(); save(); updateHud(); },
+    addAffection:addAffection, cheer:CHEER, companions:COMP, homeIds:homeIds,
     pet: pet, selectPet: selectPet, say: say, mini: MINI, auth: window.HPAuth, line: line, curPose: function () { return curPose().id; }, openSheet: openSheet, closeSheet: closeSheet, level: level,
   };
 
@@ -847,13 +910,14 @@
     if (!cur) { HPAuth.show(function (info) { start(info); }); return; }
     start();
   }
-  function logout() { save(); HPAuth.logout(); nCall('setOverlay', false, overlayCfg()); location.reload(); }
+  function logout() { save(); nCall('configureCheer',JSON.stringify({enabled:false})); HPAuth.logout(); nCall('setOverlay', false, overlayCfg()); location.reload(); }
 
   function start(info) {
     var cur = window.HPAuth && HPAuth.current();
     if (cur) SAVE_KEY = HPAuth.saveKey(cur.id);
     var existed = load(); started = true;
     if (!existed && info && info.pet && petById[info.pet]) S.pet = info.pet;
+    initProgress();
     if (cur) { HPAuth.setPet(S.pet); hudProf = ''; }
     if (info && info.migrated) toast('예전 저장 기록을 ' + cur.nick + ' 프로필로 옮겼어요');
     offline((Date.now() - S.lastSave) / 3600000); refundNote();
@@ -861,6 +925,8 @@
     checkDaily(); if (!existed) say('안녕! 나는 ' + petName() + '! 잘 부탁해요~', 3.5, 'greet'); else talk('greet', 3);
     resize(); var b = bounds(); pet.x = pet.tx = (b.x0 + b.x1) / 2; pet.y = pet.ty = (b.y0 + b.y1) / 2;
     updateHud(); updateDot(); save(); nativeSync();
+    if (window.HPCloud) { HPCloud.session(HPAuth.current()); HPCloud.sync(true); }
+    CHEER.opened();
     requestAnimationFrame(loop);
   }
   var fontReady = (document.fonts && document.fonts.load) ? document.fonts.load('20px Jua', '가') : Promise.resolve();

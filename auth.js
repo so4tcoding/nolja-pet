@@ -45,7 +45,7 @@
 
   var A = window.HPAuth = {
     list: function () { return load().list.map(function (p) { return { id: p.id, nick: p.nick, pet: p.pet }; }); },
-    current: function () { var d = load(); var p = find(d, d.current); return p ? { id: p.id, nick: p.nick, pet: p.pet } : null; },
+    current: function () { var d = load(); var p = find(d, d.current); return p ? { id: p.id, nick: p.nick, originalNick: p.originalNick || p.nick, pet: p.pet, cloud: p.cloud || null } : null; },
     saveKey: function (id) { return 'healingpet_save_p_' + (id || load().current); },
     validNick: function (n) { n = String(n || '').trim(); return n.length >= 1 && n.length <= 10; },
     nickTaken: function (n) { n = String(n).trim(); return load().list.some(function (p) { return p.nick === n; }); },
@@ -62,8 +62,9 @@
     },
     login: function (id, pin) {
       var d = load(), p = find(d, id); if (!p) return { ok: false, msg: '프로필이 없어요' };
-      if (pinHash(p.salt, pin) !== p.hash) return { ok: false, msg: '비밀번호가 달라요' };
-      d.current = id; store(d); return { ok: true };
+      var l = p.lock || { n: 0, until: 0 }; if (l.until > Date.now() && l.n >= 5) return { ok:false, msg:'5회 실패했어요. 15분 뒤 다시 해 주세요' };
+      if (pinHash(p.salt, pin) !== p.hash) { if (l.until <= Date.now()) l={n:0,until:Date.now()+900000}; l.n++; p.lock=l; store(d); return { ok: false, msg: '비밀번호가 달라요' }; }
+      delete p.lock; d.current = id; store(d); return { ok: true };
     },
     logout: function () { var d = load(); d.current = ''; store(d); },
     setPet: function (pet) { var d = load(), p = find(d, d.current); if (p && p.pet !== pet) { p.pet = pet; store(d); } },
@@ -100,6 +101,15 @@
       try { if (o.save) localStorage.setItem(A.saveKey(p.id), o.save); } catch (e) { return { ok: false, msg: '저장 공간이 부족해요' }; }
       return { ok: true, id: p.id, nick: p.nick, restored: !!same };
     },
+    setCloud: function (id, cloud) { var d=load(),p=find(d,id); if(p) {p.cloud=cloud;p.originalNick=cloud.originalNick || p.nick;store(d);} },
+    restoreCloud: function (r, pin) {
+      var d=load(), p=d.list.filter(function(q){return q.cloud && q.cloud.accountId===r.accountId;})[0];
+      if (!p && d.list.some(function(q){return q.nick===r.originalNick;})) return {ok:false,msg:'이 폰에 같은 이름의 로컬 프로필이 있어요. 백업 후 이름이 겹치는 로컬 프로필을 정리해 주세요'};
+      if (!p) {p={id:rid(),nick:r.originalNick,pet:r.pet||D.pets[0].id,created:Date.now()};d.list.push(p);}
+      p.salt=rid()+rid();p.hash=pinHash(p.salt,pin);p.cloud={accountId:r.accountId,originalNick:r.originalNick,code:r.code};p.originalNick=r.originalNick;
+      try {var raw=JSON.parse(r.save||'{}');if(raw && raw.pet) localStorage.setItem(A.saveKey(p.id),JSON.stringify(raw));} catch(e){return {ok:false,msg:'복구 데이터를 읽을 수 없어요'};}
+      d.current=p.id;store(d);return {ok:true,id:p.id};
+    },
     _sha256: sha256,
   };
 
@@ -112,7 +122,7 @@
 
   A.show = function (onDone) {
     var box = $('login'); box.classList.remove('hidden');
-    var view = A.list().length ? 'pick' : 'create', sel = null, pin = '', form = { nick: '', pet: D.pets[0].id, pin1: '' }, msg = '';
+    var view = A.list().length ? 'pick' : 'create', sel = null, pin = '', form = { nick: '', pet: D.pets[0].id, pin1: '' }, msg = '', busy = false;
     function render() {
       var h = '<div class="lgTitle">놀자! 먼작귀</div>';
       if (view === 'pick') {
@@ -120,6 +130,10 @@
         A.list().forEach(function (p) { h += '<button class="lgProf" data-id="' + p.id + '"><img src="' + avatar(p.pet) + '" alt=""><span>' + esc(p.nick) + '</span></button>'; });
         h += '<button class="lgProf lgNew" data-new="1"><span class="plus">+</span><span>새 친구</span></button></div>' +
           '<button class="lgLink" data-import="1">🔑 백업 코드로 불러오기</button>';
+      } else if (view === 'recover') {
+        h += '<div class="lgSub">계정 복구</div><p>처음 만든 계정 이름과 PIN으로<br>다른 폰의 기록을 불러와요.</p><p id="recoveryServer">' + (HPCloud.configured ? 'Firebase 계정 복구' : '서버 준비 중 · 지금은 백업 코드를 이용해 주세요') + '</p>' +
+          '<input id="recoverNick" maxlength="10" placeholder="처음 만든 계정 이름" autocomplete="username"><input id="recoverPin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN 4자리" autocomplete="off">' +
+          '<button class="primary lgGo" data-dorecover="1"' + (HPCloud.configured ? '' : ' disabled') + '>계정 복구</button><button class="lgLink" data-import="1">백업 코드로 불러오기</button><button class="lgLink" data-back="1">← 돌아가기</button>';
       } else if (view === 'import') {
         h += '<div class="lgSub">백업 코드로 불러오기</div><textarea id="lgCode" placeholder="NJ1-로 시작하는 백업 코드를 붙여 넣어 주세요" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>' +
           '<button class="primary lgGo" data-doimport="1">불러오기</button><button class="lgLink" data-back="1">← 돌아가기</button>';
@@ -138,10 +152,12 @@
         h += '<img class="lgAv" src="' + avatar(form.pet) + '" alt=""><div class="lgSub">' + (view === 'pin1' ? '비밀번호 숫자 4자리' : '한 번 더 눌러 주세요') + '</div>' + dots() + pad() +
           '<button class="lgLink" data-back="1">← 돌아가기</button>';
       }
-      h += '<div class="lgMsg">' + esc(msg) + '</div><div class="lgNote">이 폰 안에만 저장돼요 (친구끼리 같은 폰을 같이 쓸 때 사용)' +
+      if (view === 'create' || view === 'pick') h += '<button class="lgLink" data-recover="1">☁ 계정 복구</button>';
+      h += '<div class="lgMsg">' + esc(msg) + '</div><div class="lgNote">기본 기록은 이 폰에 저장 · 서버 연결 시 복구 가능' +
         (window.HPNative ? '' : '<br><a class="lgInstall" href="install.html">📲 설치 방법 (아이폰 · 안드로이드)</a>') + '</div>';
       box.innerHTML = '<div class="lgCard">' + h + '</div>';
       bind();
+      if(busy) Array.prototype.forEach.call(box.querySelectorAll('button'),function(b){b.disabled=true;});
     }
     function dots() { var s = '<div class="lgDots">'; for (var i = 0; i < 4; i++) s += '<i class="' + (i < pin.length ? 'on' : '') + '"></i>'; return s + '</div>'; }
     function pad() { var s = '<div class="lgPad">'; [1, 2, 3, 4, 5, 6, 7, 8, 9, 'x', 0, '<'].forEach(function (k) { s += k === 'x' ? '<span></span>' : '<button data-k="' + k + '">' + (k === '<' ? '⌫' : k) + '</button>'; }); return s + '</div>'; }
@@ -158,6 +174,13 @@
             view = 'pin1'; pin = ''; msg = ''; render();
           }
           else if (b.getAttribute('data-back')) { pin = ''; msg = ''; view = (view === 'pin1' || view === 'pin2') ? 'create' : (view === 'import' && !A.list().length) ? 'create' : 'pick'; if (view === 'pick' && !A.list().length) view = 'create'; render(); }
+          else if (b.getAttribute('data-recover')) { view='recover';msg='';render(); }
+          else if (b.getAttribute('data-dorecover')) {
+            var n=$('recoverNick').value.trim(), pn=$('recoverPin').value;
+            if(!A.validNick(n) || !/^\d{4}$/.test(pn)){msg='계정 이름과 숫자 PIN 4자리를 입력해 주세요';render();return;}
+            b.disabled=true; b.textContent='복구 중…';
+            HPCloud.recover(n,pn).then(function(r){var rr=A.restoreCloud(r,pn);pn='';if(!rr.ok) throw Error(rr.msg);box.classList.add('hidden');onDone();}).catch(function(e){pn='';msg=e.message;render();});
+          }
           else if (b.getAttribute('data-import')) { view = 'import'; msg = ''; render(); }
           else if (b.getAttribute('data-doimport')) {
             var r = A.importCode($('lgCode').value);
@@ -169,6 +192,7 @@
       });
     }
     function key(k) {
+      if(busy)return;
       if (k === '<') { pin = pin.slice(0, -1); render(); return; }
       if (pin.length >= 4) return;
       pin += k; render();
@@ -180,8 +204,15 @@
         } else if (view === 'pin1') { form.pin1 = pin; pin = ''; view = 'pin2'; msg = ''; render(); }
         else if (view === 'pin2') {
           if (pin !== form.pin1) { msg = '두 번 누른 비밀번호가 달라요. 처음부터 눌러 주세요'; pin = ''; view = 'pin1'; render(); return; }
-          var c = A.create(form.nick, pin, form.pet);
-          if (c.ok) { box.classList.add('hidden'); onDone({ created: true, pet: form.pet, migrated: c.migrated }); } else { msg = c.msg; pin = ''; view = 'create'; render(); }
+          var pp=pin; pin=''; busy=true; var pending = HPCloud.configured ? HPCloud.register(form.nick,pp,form.pet,'{}') : Promise.resolve(null);
+          msg='계정 만드는 중…'; render();
+          pending.then(function(cloud){
+            busy=false;
+            var c=A.create(form.nick,pp,form.pet);pp='';
+            if(!c.ok) throw Error(c.msg);
+            if(cloud) A.setCloud(c.id,cloud);
+            box.classList.add('hidden'); onDone({created:true,pet:form.pet,migrated:c.migrated});
+          }).catch(function(e){busy=false;pp='';msg=HPCloud.configured ? (e.code ? HPCloud.error(e) : e.message) : e.message;view='create';render();});
         }
       }, 150);
     }

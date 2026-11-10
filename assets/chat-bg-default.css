@@ -1,0 +1,3 @@
+/* v2.0 default = existing game stage background, no new art.
+   Replace only this rule later with background-image:url('your-background.jpg'); */
+#chatCanvasBg { background: linear-gradient(180deg, #ffe3ea 0%, #fff5eb 65%, #edf5dc 100%); background-size:cover; background-position:center; }
