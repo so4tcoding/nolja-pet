@@ -204,7 +204,8 @@
         } else if (view === 'pin1') { form.pin1 = pin; pin = ''; view = 'pin2'; msg = ''; render(); }
         else if (view === 'pin2') {
           if (pin !== form.pin1) { msg = '두 번 누른 비밀번호가 달라요. 처음부터 눌러 주세요'; pin = ''; view = 'pin1'; render(); return; }
-          var pp=pin; pin=''; busy=true; var pending = HPCloud.configured ? HPCloud.register(form.nick,pp,form.pet,'{}') : Promise.resolve(null);
+          var pp=pin; pin=''; busy=true; // v2.2: wait for the readiness probe instead of reading a not-yet-settled flag (otherwise the profile silently stays local, with no friend code).
+          var pending = HPCloud.hasConfig ? HPCloud.probe().then(function(){return HPCloud.register(form.nick,pp,form.pet,'{}');},function(){return null;}) : Promise.resolve(null);
           msg='계정 만드는 중…'; render();
           pending.then(function(cloud){
             busy=false;
